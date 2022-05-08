@@ -1,4 +1,4 @@
-// Copyright 2020 Steven Bosnick
+// Copyright 2022 Steven Bosnick
 //
 // Licensed under the Apache License, Version 2.0 <LICENSE-APACHE-2.0 or
 // http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
@@ -11,6 +11,8 @@
 #![cfg_attr(not(test), no_std)]
 #![forbid(unsafe_code)]
 #![deny(missing_docs, warnings)]
+
+mod cmds;
 
 use core::marker::PhantomData;
 
