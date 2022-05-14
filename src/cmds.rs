@@ -23,12 +23,18 @@ pub fn send_if_cond(check_pattern: u8, buffer: &mut [u8]) {
     Cmd::SendIfCond.encode((VHS << 8) | (check_pattern as u32), buffer)
 }
 
+/// Encode an AppCmd command. The next command should be an application command.
+// TODO: remove this when it is no longer needed
+#[allow(dead_code)]
+pub fn app_cmd(buffer: &mut [u8]) {
+    Cmd::AppCmd.encode(0, buffer);
+}
+
 /// Encode an SdSendOpCond app command.
 // TODO: remove this when it is no longer needed
 #[allow(dead_code)]
 pub fn sd_send_op_cond(hcs: HostCapacitySupport, buffer: &mut [u8]) {
-    Cmd::AppCmd.encode(0, &mut buffer[0..6]);
-    AppCmd::SdSendOpCond.encode(hcs.to_arg(), &mut buffer[6..12]);
+    AppCmd::SdSendOpCond.encode(hcs.to_arg(), buffer);
 }
 
 /// Host support for differend SD Card capacities.
@@ -234,13 +240,10 @@ mod tests {
 
     #[test]
     fn sd_send_op_code_encodes_as_expected() {
-        let mut buffer = [0; 12];
+        let mut buffer = [0; 6];
 
         sd_send_op_cond(HostCapacitySupport::HcOrXcSupported, &mut buffer);
 
-        assert_eq!(
-            buffer,
-            [0x77, 0x00, 0x00, 0x00, 0x00, 0x01, 0x69, 0x40, 0x00, 0x00, 0x00, 0x01]
-        )
+        assert_eq!(buffer, [0x69, 0x40, 0x00, 0x00, 0x00, 0x01])
     }
 }
