@@ -10,6 +10,8 @@
 
 use crc::{Crc, CRC_7_MMC};
 
+use crate::constants::VOLTAGE_2_7_TO_3_6;
+
 /// Encode a GoIdleState command
 // TODO: remove this when it is no longer needed
 #[allow(dead_code)]
@@ -21,8 +23,8 @@ pub fn go_idle_state(buffer: &mut [u8]) {
 // TODO: remove this when it is no longer needed
 #[allow(dead_code)]
 pub fn send_if_cond(check_pattern: u8, buffer: &mut [u8]) {
-    const VHS: u32 = 0b0001;
-    Cmd::SendIfCond.encode((VHS << 8) | (check_pattern as u32), buffer)
+    let vhs: u32 = VOLTAGE_2_7_TO_3_6.into();
+    Cmd::SendIfCond.encode((vhs << 8) | (check_pattern as u32), buffer)
 }
 
 /// Encode an AppCmd command. The next command should be an application command.

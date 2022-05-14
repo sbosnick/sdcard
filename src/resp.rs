@@ -16,16 +16,37 @@
 //! of the Simplified Specification). If [`R1Response::response_truncated`]
 //! returns `true` then the remaining bytes of a non `R1` response will not
 //! be sent from the card.
+//!
+//! The non-R1 responses currently implmented are:
+//!     - R7
+//!
+//! The non-R1 responses that are not yet implemented are:
+//!     - R1b
+//!     - R2
+//!     - R3
 
 use core::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign};
 
 use snafu::{ensure, Snafu};
 
-/// Newtype to embodity the logic of an R1 response.
+use crate::constants::VOLTAGE_2_7_TO_3_6;
+
+/// Newtype to support decoding of an R1 response.
 ///
 /// This type is based on section 7.3.2.1 of the Simplified Specification.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct R1Response(u8);
+
+/// Newtype to support decoding of an R7 response.
+///
+/// This type decodes the last 4 bytes of the R7 response. The first byte
+/// is an R1 response that should be decoded with [`R1Response`]. The remaining
+/// bytes of the R7 response (after the R1 byte) will not be present if
+/// [`R1Response::response_truncated`] is true.
+///
+/// This type is based on sectin 7.3.2.6 of the Simplified Specification.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct R7Response(u32);
 
 #[derive(Debug, PartialEq, Snafu)]
 pub enum ResponseError {
@@ -43,6 +64,12 @@ pub enum ResponseError {
 
     #[snafu(display("SD Card detected a paramater error."))]
     ParameterError,
+
+    #[snafu(display("SD Card responded with an unexpected voltage."))]
+    UnexpectVoltage,
+
+    #[snafu(display("SD Card responded with unexpected check pattern."))]
+    CheckPatternMismatch,
 }
 
 impl R1Response {
@@ -83,6 +110,36 @@ impl R1Response {
 
     fn is_set(self, rhs: Self) -> bool {
         (self & rhs) != Self::NONE
+    }
+}
+
+impl R7Response {
+    // TODO: remove this when it is no longer needed
+    #[allow(dead_code)]
+    pub fn new(byte2: u8, byte3: u8, byte4: u8, byte5: u8) -> Self {
+        let b2: u32 = byte2 as u32;
+        let b3: u32 = byte3 as u32;
+        let b4: u32 = byte4 as u32;
+        let b5: u32 = byte5 as u32;
+
+        R7Response((b2 << 24) | (b3 << 16) | (b4 << 8) | b5)
+    }
+
+    // TODO: remove this when it is no longer needed
+    #[allow(dead_code)]
+    pub fn check(&self, check_pattern: u8) -> Result<(), ResponseError> {
+        const VOLTAGE_ACCEPTED_MASK: u32 = 0b0000_1111 << 8;
+        const CHECK_PATTERN_MASK: u32 = 0x0000_00FF;
+        ensure!(
+            (self.0 & VOLTAGE_ACCEPTED_MASK) >> 8 == VOLTAGE_2_7_TO_3_6.into(),
+            UnexpectVoltageSnafu
+        );
+        ensure!(
+            self.0 & CHECK_PATTERN_MASK == check_pattern.into(),
+            CheckPatternMismatchSnafu
+        );
+
+        Ok(())
     }
 }
 
@@ -200,5 +257,31 @@ mod tests {
         let r1 = R1Response::new(0b0100_0000);
 
         assert!(!r1.response_truncated(), "r1 unexpectedly truncated");
+    }
+
+    #[test]
+    fn r7_with_unexpect_voltage_is_error() {
+        let r7 = R7Response::new(0, 0, 0b0000_0100, 0);
+        let result = r7.check(0);
+
+        assert_eq!(result, Err(ResponseError::UnexpectVoltage));
+    }
+
+    #[test]
+    fn r7_with_unexpted_check_pattern_is_error() {
+        let r7 = R7Response::new(0, 0, VOLTAGE_2_7_TO_3_6, 0xff);
+        let result = r7.check(0xab);
+
+        assert_eq!(result, Err(ResponseError::CheckPatternMismatch));
+    }
+
+    #[test]
+    fn r7_with_expected_values_is_ok() {
+        let check_pattern = 42;
+
+        let r7 = R7Response::new(0, 0, VOLTAGE_2_7_TO_3_6, check_pattern);
+        let result = r7.check(check_pattern);
+
+        assert_eq!(result, Ok(()));
     }
 }

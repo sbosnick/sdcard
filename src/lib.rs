@@ -13,6 +13,7 @@
 #![deny(missing_docs, warnings)]
 
 mod cmds;
+mod constants;
 mod resp;
 
 use core::marker::PhantomData;
