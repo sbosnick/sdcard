@@ -17,6 +17,9 @@ mod constants;
 mod initilization;
 mod resp;
 
+#[cfg(test)]
+mod testutils;
+
 use core::fmt::Debug;
 
 use embedded_hal::{
@@ -145,33 +148,9 @@ mod tests {
 
     use embedded_hal_mock::delay;
 
+    use crate::testutils::{FakePin, FakeSpi};
+
     use super::*;
-
-    #[derive(Debug)]
-    struct FakeSpi;
-    #[derive(Debug)]
-    struct FakePin;
-    struct FakeError;
-
-    impl Write<u8> for FakeSpi {
-        type Error = FakeError;
-
-        fn write(&mut self, _words: &[u8]) -> Result<(), Self::Error> {
-            Ok(())
-        }
-    }
-
-    impl OutputPin for FakePin {
-        type Error = FakeError;
-
-        fn set_low(&mut self) -> Result<(), Self::Error> {
-            Ok(())
-        }
-
-        fn set_high(&mut self) -> Result<(), Self::Error> {
-            Ok(())
-        }
-    }
 
     #[test]
     fn sd_card_with_speed_increase_increases_speed() {

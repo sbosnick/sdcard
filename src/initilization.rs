@@ -41,9 +41,33 @@ pub fn power_up_card(
     Ok(())
 }
 
+// TODO: remove this when it is no longer needed
+#[allow(dead_code)]
+fn with_cs_low<CS, SPI, F, O>(cs: &mut CS, spi: &mut SPI, f: F) -> Result<O, Error>
+where
+    CS: OutputPin,
+    SPI: Write<u8>,
+    F: Fn(&mut SPI) -> Result<O, Error>,
+{
+    cs.set_low()
+        .map_err(|_| ChipSelectSnafu {}.build())
+        .and_then(|_| f(spi))
+        .and_then(|o| {
+            cs.set_high()
+                .map(|_| o)
+                .map_err(|_| ChipSelectSnafu {}.build())
+        })
+        .or_else(|e| {
+            let _ = cs.set_high();
+            Err(e)
+        })
+}
+
 #[cfg(test)]
 mod test {
     use std::io::ErrorKind;
+
+    use crate::testutils::FakeSpi;
 
     use embedded_hal_mock::{delay, pin, spi, MockError};
 
@@ -72,5 +96,16 @@ mod test {
         let result = power_up_card(&mut spi, &mut cs, &mut delay);
 
         assert_eq!(result, Err(Error::ChipSelect));
+    }
+
+    #[test]
+    fn with_cs_low_toggles_cs() {
+        let set_low = pin::Transaction::set(pin::State::Low);
+        let set_high = pin::Transaction::set(pin::State::High);
+        let mut cs = pin::Mock::new(&[set_low, set_high]);
+
+        let _ = with_cs_low(&mut cs, &mut FakeSpi, |_| Ok(()));
+
+        cs.done();
     }
 }
