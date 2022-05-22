@@ -17,9 +17,15 @@ mod constants;
 mod initilization;
 mod resp;
 
-use embedded_hal::blocking::delay::DelayMs;
+use core::fmt::Debug;
+
+use embedded_hal::{
+    blocking::{delay::DelayMs, spi::Write},
+    digital::v2::OutputPin,
+};
 use embedded_storage::{ReadStorage, Storage};
-use snafu::prelude::*;
+use initilization::power_up_card;
+use snafu::{prelude::*, IntoError};
 
 /// An SD Card interface built from an SPI periferal and a Chip Select pin.
 ///
@@ -30,7 +36,11 @@ pub struct SDCard<SPI, CS> {
     cs: CS,
 }
 
-impl<SPI, CS> SDCard<SPI, CS> {
+impl<SPI, CS> SDCard<SPI, CS>
+where
+    SPI: Debug + Write<u8>,
+    CS: Debug + OutputPin,
+{
     /// Create a new [`SDCard`] using the given `SPI` interface and chip select.
     ///
     /// The `SPI` interface should have a clock rate between 100 kHz and 400 kHz.
@@ -52,9 +62,9 @@ impl<SPI, CS> SDCard<SPI, CS> {
     /// The speed should be increased to 25 MHz (the maximum speed for an SD card
     /// using `SPI` mode).
     pub fn with_speed_increase(
-        spi: SPI,
-        cs: CS,
-        _delay: &mut impl DelayMs<u8>,
+        mut spi: SPI,
+        mut cs: CS,
+        delay: &mut impl DelayMs<u8>,
         increase_speed: impl FnOnce(SPI) -> SPI,
     ) -> Result<Self, InitilizationError<SPI, CS>> {
         // This initialized the SD card using the power up sequence in section
@@ -63,6 +73,8 @@ impl<SPI, CS> SDCard<SPI, CS> {
         // are references to the Simplifed Specification).
 
         // 1. delay 1 ms then 74 clocks with CS high (6.4.1.1)
+        let result = power_up_card(&mut spi, &mut cs, delay);
+
         // 2. GoToIdle
         // 3. SendIfCond and check for illegal command (v1 card)
         // 4. CrcOnOff to turn crc checking on
@@ -70,11 +82,14 @@ impl<SPI, CS> SDCard<SPI, CS> {
         // 6. SendOpCond (with HCR if not v1 card) repeatedly until not idle
         // 7. If not v1 card then ReadOcr and check card capacity
 
-        // 8. (optional) Increase frequency of the SPI
-        Ok(Self {
-            cs,
-            spi: increase_speed(spi),
-        })
+        match result {
+            Ok(()) => {
+                // 8. (optional) Increase frequency of the SPI
+                let spi = increase_speed(spi);
+                Ok(Self { cs, spi })
+            }
+            Err(e) => Err(InitilizationSnafu { cs, spi }.into_error(e)),
+        }
     }
 }
 
@@ -88,13 +103,13 @@ impl<SPI, CS> SDCard<SPI, CS> {
 /// The error type for [`SDCard`] initilization operations.
 #[derive(Debug, Snafu)]
 #[snafu(display("Unable to initilize the SD Card in SPI mode."))]
-pub struct InitilizationError<SPI, CS> {
+pub struct InitilizationError<SPI: Debug, CS: Debug> {
     source: initilization::Error,
     spi: SPI,
     cs: CS,
 }
 
-impl<SPI, CS> InitilizationError<SPI, CS> {
+impl<SPI: Debug, CS: Debug> InitilizationError<SPI, CS> {
     /// Consume the `InitilizationError` and return the `SPI` and chip select
     /// that had been passed to the `SDCard` initilization function.
     pub fn release(self) -> (SPI, CS) {
@@ -126,20 +141,44 @@ impl<SPI, CS> ReadStorage for SDCard<SPI, CS> {
 
 #[cfg(test)]
 mod tests {
-    use std::{iter, sync::Arc};
+    use std::sync::Arc;
 
-    use embedded_hal_mock::{delay, pin, spi};
+    use embedded_hal_mock::delay;
 
     use super::*;
+
+    #[derive(Debug)]
+    struct FakeSpi;
+    #[derive(Debug)]
+    struct FakePin;
+    struct FakeError;
+
+    impl Write<u8> for FakeSpi {
+        type Error = FakeError;
+
+        fn write(&mut self, _words: &[u8]) -> Result<(), Self::Error> {
+            Ok(())
+        }
+    }
+
+    impl OutputPin for FakePin {
+        type Error = FakeError;
+
+        fn set_low(&mut self) -> Result<(), Self::Error> {
+            Ok(())
+        }
+
+        fn set_high(&mut self) -> Result<(), Self::Error> {
+            Ok(())
+        }
+    }
 
     #[test]
     fn sd_card_with_speed_increase_increases_speed() {
         let mut increased = false;
         let mut delay = delay::MockNoop::new();
-        let spi = spi::Mock::new(iter::empty());
-        let cs = pin::Mock::new(iter::empty());
 
-        let _ = SDCard::with_speed_increase(spi, cs, &mut delay, |s| {
+        let _ = SDCard::with_speed_increase(FakeSpi, FakePin, &mut delay, |s| {
             increased = true;
             s
         });
@@ -154,9 +193,11 @@ mod tests {
     fn sd_card_release_returns_contained_resourses() {
         let spi = Arc::new(5);
         let cs = Arc::new(true);
-        let mut delay = delay::MockNoop::new();
 
-        let sut = SDCard::new(spi.clone(), cs.clone(), &mut delay).expect("error creating SDCard");
+        let sut = SDCard {
+            spi: spi.clone(),
+            cs: cs.clone(),
+        };
         let (rel_spi, rel_cs) = sut.release();
 
         assert!(Arc::ptr_eq(&spi, &rel_spi), "spi missmatch on release");
