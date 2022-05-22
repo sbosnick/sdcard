@@ -25,8 +25,8 @@ use snafu::prelude::*;
 /// We need the Chip Select to be separate so we can write some bytes without
 /// Chip Select asserted to put the card into SPI mode.
 pub struct SDCard<SPI, CS> {
-    _cs: CS,
-    _spi: SPI,
+    spi: SPI,
+    cs: CS,
 }
 
 impl<SPI, CS> SDCard<SPI, CS> {
@@ -67,9 +67,16 @@ impl<SPI, CS> SDCard<SPI, CS> {
         // 8. (optional) Increase frequency of the SPI
 
         Ok(Self {
-            _cs: cs,
-            _spi: increase_speed(spi),
+            cs,
+            spi: increase_speed(spi),
         })
+    }
+}
+
+impl<SPI, CS> SDCard<SPI, CS> {
+    /// Consume the `SDCard` and return the underlying `SPI` and chip select.
+    pub fn release(self) -> (SPI, CS) {
+        (self.spi, self.cs)
     }
 }
 
@@ -101,7 +108,9 @@ impl<SPI, CS> ReadStorage for SDCard<SPI, CS> {
 
 #[cfg(test)]
 mod tests {
-    use embedded_hal_mock::delay;
+    use std::{iter, sync::Arc};
+
+    use embedded_hal_mock::{delay, pin, spi};
 
     use super::*;
 
@@ -109,8 +118,10 @@ mod tests {
     fn sd_card_with_speed_increase_increases_speed() {
         let mut increased = false;
         let mut delay = delay::MockNoop::new();
+        let spi = spi::Mock::new(iter::empty());
+        let cs = pin::Mock::new(iter::empty());
 
-        let _ = SDCard::with_speed_increase((), (), &mut delay, |s| {
+        let _ = SDCard::with_speed_increase(spi, cs, &mut delay, |s| {
             increased = true;
             s
         });
@@ -119,5 +130,18 @@ mod tests {
             increased,
             "with_speed_increase() did not call the passed closure"
         );
+    }
+
+    #[test]
+    fn sd_card_release_returns_contained_resourses() {
+        let spi = Arc::new(5);
+        let cs = Arc::new(true);
+        let mut delay = delay::MockNoop::new();
+
+        let sut = SDCard::new(spi.clone(), cs.clone(), &mut delay).expect("error creating SDCard");
+        let (rel_spi, rel_cs) = sut.release();
+
+        assert!(Arc::ptr_eq(&spi, &rel_spi), "spi missmatch on release");
+        assert!(Arc::ptr_eq(&cs, &rel_cs), "cs missmatch on release");
     }
 }
