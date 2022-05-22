@@ -14,6 +14,7 @@
 
 mod cmds;
 mod constants;
+mod initilization;
 mod resp;
 
 use embedded_hal::blocking::delay::DelayMs;
@@ -35,7 +36,11 @@ impl<SPI, CS> SDCard<SPI, CS> {
     /// The `SPI` interface should have a clock rate between 100 kHz and 400 kHz.
     /// See [`SDCard::with_speed_increase`] for a means to increase the clock
     /// rate after the card initilization is complete.
-    pub fn new(spi: SPI, cs: CS, delay: &mut impl DelayMs<u8>) -> Result<Self, InitilizationError> {
+    pub fn new(
+        spi: SPI,
+        cs: CS,
+        delay: &mut impl DelayMs<u8>,
+    ) -> Result<Self, InitilizationError<SPI, CS>> {
         Self::with_speed_increase(spi, cs, delay, |spi| spi)
     }
 
@@ -51,7 +56,7 @@ impl<SPI, CS> SDCard<SPI, CS> {
         cs: CS,
         _delay: &mut impl DelayMs<u8>,
         increase_speed: impl FnOnce(SPI) -> SPI,
-    ) -> Result<Self, InitilizationError> {
+    ) -> Result<Self, InitilizationError<SPI, CS>> {
         // This initialized the SD card using the power up sequence in section
         // 6.4.1 followed by the initilization flow from Figure 7-2. (Unless
         // otherwise indicated the section and figure refences in the comments
@@ -64,8 +69,8 @@ impl<SPI, CS> SDCard<SPI, CS> {
         // 5. ReadOcr and check for compatible voltage (or assume it is in range)
         // 6. SendOpCond (with HCR if not v1 card) repeatedly until not idle
         // 7. If not v1 card then ReadOcr and check card capacity
-        // 8. (optional) Increase frequency of the SPI
 
+        // 8. (optional) Increase frequency of the SPI
         Ok(Self {
             cs,
             spi: increase_speed(spi),
@@ -82,7 +87,20 @@ impl<SPI, CS> SDCard<SPI, CS> {
 
 /// The error type for [`SDCard`] initilization operations.
 #[derive(Debug, Snafu)]
-pub struct InitilizationError {}
+#[snafu(display("Unable to initilize the SD Card in SPI mode."))]
+pub struct InitilizationError<SPI, CS> {
+    source: initilization::Error,
+    spi: SPI,
+    cs: CS,
+}
+
+impl<SPI, CS> InitilizationError<SPI, CS> {
+    /// Consume the `InitilizationError` and return the `SPI` and chip select
+    /// that had been passed to the `SDCard` initilization function.
+    pub fn release(self) -> (SPI, CS) {
+        (self.spi, self.cs)
+    }
+}
 
 /// The error type for [`SDCard`] IO operations.
 #[derive(Debug, Snafu)]
