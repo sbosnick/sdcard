@@ -9,10 +9,15 @@
 //! Functions and types related to initilization of an SD Card over SPI
 
 use embedded_hal::{
-    blocking::{delay::DelayMs, spi::Write},
+    blocking::{
+        delay::DelayMs,
+        spi::{Transfer, Write},
+    },
     digital::v2::OutputPin,
 };
 use snafu::prelude::*;
+
+const WAIT_FOR_CARD_COUNT: u32 = 32_000;
 
 #[derive(Debug, PartialEq, Snafu)]
 pub enum Error {
@@ -21,6 +26,12 @@ pub enum Error {
 
     #[snafu(display("Unable to write to SPI for initilization."))]
     SpiWrite,
+
+    #[snafu(display("Unable to transfer to and from SPI."))]
+    SpiTransfer,
+
+    #[snafu(display("Timeout waiting for the card to be ready."))]
+    WaitForCardTimeout,
 }
 
 /// Power up sequence from section 6.4.1 of the Simplified Specification.
@@ -41,9 +52,19 @@ pub fn power_up_card(
     Ok(())
 }
 
-// TODO: remove this when it is no longer needed
-#[allow(dead_code)]
-fn with_cs_low<CS, SPI, F, O>(cs: &mut CS, spi: &mut SPI, f: F) -> Result<O, Error>
+pub fn initilization_flow<SPI>(_spi: &mut SPI) -> Result<(), Error> {
+    // 2. GoToIdle
+    // 3. SendIfCond and check for illegal command (v1 card)
+    // 4. CrcOnOff to turn crc checking on
+    // 5. ReadOcr and check for compatible voltage (or assume it is in range)
+    // 6. SendOpCond (with HCR if not v1 card) repeatedly until not idle
+    // 7. If not v1 card then ReadOcr and check card capacity
+
+    // TODO: implement this
+    Ok(())
+}
+
+pub fn with_cs_low<CS, SPI, F, O>(cs: &mut CS, spi: &mut SPI, f: F) -> Result<O, Error>
 where
     CS: OutputPin,
     SPI: Write<u8>,
@@ -58,14 +79,38 @@ where
                 .map_err(|_| ChipSelectSnafu {}.build())
         })
         .or_else(|e| {
+            // ignore the error to give priority to the error from f(spi)
             let _ = cs.set_high();
             Err(e)
         })
 }
 
+// TODO: remove this when it is no longer needed
+#[allow(dead_code)]
+fn wait_for_card<SPI: Transfer<u8>>(spi: &mut SPI) -> Result<(), Error> {
+    for _ in 0..WAIT_FOR_CARD_COUNT {
+        if receive(spi)? == 0xff {
+            return Ok(());
+        }
+
+        // TODO: use a DelayUs impl here
+    }
+
+    WaitForCardTimeoutSnafu {}.fail()
+}
+
+fn receive<SPI: Transfer<u8>>(spi: &mut SPI) -> Result<u8, Error> {
+    let mut buffer = [0xff];
+    let response = spi
+        .transfer(&mut buffer)
+        .map_err(|_| SpiTransferSnafu {}.build())?;
+
+    Ok(response[0])
+}
+
 #[cfg(test)]
 mod test {
-    use std::io::ErrorKind;
+    use std::{io::ErrorKind, iter};
 
     use crate::testutils::FakeSpi;
 
@@ -107,5 +152,33 @@ mod test {
         let _ = with_cs_low(&mut cs, &mut FakeSpi, |_| Ok(()));
 
         cs.done();
+    }
+
+    #[test]
+    fn wait_for_card_is_ok_after_cipo_high() {
+        let expected = [
+            spi::Transaction::transfer(vec![0xff], vec![0x00]),
+            spi::Transaction::transfer(vec![0xff], vec![0x00]),
+            spi::Transaction::transfer(vec![0xff], vec![0x00]),
+            spi::Transaction::transfer(vec![0xff], vec![0xff]),
+        ];
+        let mut spi = spi::Mock::new(&expected);
+
+        let result = wait_for_card(&mut spi);
+
+        spi.done();
+        assert_eq!(result, Ok(()));
+    }
+
+    #[test]
+    fn wait_for_card_is_error_after_too_much_cipo_low() {
+        let mut spi = spi::Mock::new(
+            iter::repeat(&spi::Transaction::transfer(vec![0xff], vec![0x00]))
+                .take(WAIT_FOR_CARD_COUNT.try_into().unwrap()),
+        );
+
+        let result = wait_for_card(&mut spi);
+
+        assert_eq!(result, Err(Error::WaitForCardTimeout));
     }
 }

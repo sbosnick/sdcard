@@ -27,7 +27,7 @@ use embedded_hal::{
     digital::v2::OutputPin,
 };
 use embedded_storage::{ReadStorage, Storage};
-use initilization::power_up_card;
+use initilization::{initilization_flow, power_up_card, with_cs_low};
 use snafu::{prelude::*, IntoError};
 
 /// An SD Card interface built from an SPI periferal and a Chip Select pin.
@@ -75,15 +75,8 @@ where
         // otherwise indicated the section and figure refences in the comments
         // are references to the Simplifed Specification).
 
-        // 1. delay 1 ms then 74 clocks with CS high (6.4.1.1)
-        let result = power_up_card(&mut spi, &mut cs, delay);
-
-        // 2. GoToIdle
-        // 3. SendIfCond and check for illegal command (v1 card)
-        // 4. CrcOnOff to turn crc checking on
-        // 5. ReadOcr and check for compatible voltage (or assume it is in range)
-        // 6. SendOpCond (with HCR if not v1 card) repeatedly until not idle
-        // 7. If not v1 card then ReadOcr and check card capacity
+        let result = power_up_card(&mut spi, &mut cs, delay)
+            .and_then(|_| with_cs_low(&mut cs, &mut spi, initilization_flow));
 
         match result {
             Ok(()) => {
