@@ -11,13 +11,13 @@
 use embedded_hal::{blocking::spi::Write, digital::v2::OutputPin};
 
 #[derive(Debug)]
-pub struct FakeSpi;
+pub struct StubSpi;
 #[derive(Debug)]
-pub struct FakePin;
-pub struct FakeError;
+pub struct StubPin;
+pub struct StubError;
 
-impl OutputPin for FakePin {
-    type Error = FakeError;
+impl OutputPin for StubPin {
+    type Error = StubError;
 
     fn set_low(&mut self) -> Result<(), Self::Error> {
         Ok(())
@@ -28,8 +28,8 @@ impl OutputPin for FakePin {
     }
 }
 
-impl Write<u8> for FakeSpi {
-    type Error = FakeError;
+impl Write<u8> for StubSpi {
+    type Error = StubError;
 
     fn write(&mut self, _words: &[u8]) -> Result<(), Self::Error> {
         Ok(())

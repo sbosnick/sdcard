@@ -143,7 +143,7 @@ fn receive<SPI: Transfer<u8>>(spi: &mut SPI) -> Result<u8, Error> {
 mod test {
     use std::{io::ErrorKind, iter};
 
-    use crate::testutils::FakeSpi;
+    use crate::testutils::StubSpi;
 
     use embedded_hal_mock::{delay, pin, spi, MockError};
 
@@ -180,7 +180,7 @@ mod test {
         let set_high = pin::Transaction::set(pin::State::High);
         let mut cs = pin::Mock::new(&[set_low, set_high]);
 
-        let _ = with_cs_low(&mut cs, &mut FakeSpi, |_| Ok(()));
+        let _ = with_cs_low(&mut cs, &mut StubSpi, |_| Ok(()));
 
         cs.done();
     }

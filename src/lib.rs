@@ -141,7 +141,7 @@ mod tests {
 
     use embedded_hal_mock::delay;
 
-    use crate::testutils::{FakePin, FakeSpi};
+    use crate::testutils::{StubPin, StubSpi};
 
     use super::*;
 
@@ -150,7 +150,7 @@ mod tests {
         let mut increased = false;
         let mut delay = delay::MockNoop::new();
 
-        let _ = SDCard::with_speed_increase(FakeSpi, FakePin, &mut delay, |s| {
+        let _ = SDCard::with_speed_increase(StubSpi, StubPin, &mut delay, |s| {
             increased = true;
             s
         });
