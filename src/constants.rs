@@ -18,3 +18,9 @@
 /// This is taken from Table 4-18 (for voltage supplied) or Table 4-41
 ///(for voltage accepted) in the Simplified Specificiation.
 pub const VOLTAGE_2_7_TO_3_6: u8 = 0b0001;
+
+/// The check pattern we use for a SendIfCond command and expect to be echoed
+/// back in the R7 response.
+///
+/// This could be any value but this the one we picked.
+pub const IF_COND_CHECK_PATTERN: u8 = 0b0101_0101;

@@ -21,12 +21,13 @@ use embedded_hal::{
 use snafu::prelude::*;
 
 use crate::{
-    cmds,
-    resp::{R1Response, ResponseError},
+    cmds, constants,
+    resp::{R1Response, R7Response, ResponseError},
 };
 
 const WAIT_FOR_CARD_COUNT: u32 = 32_000;
 const MAX_WAIT_FOR_RESPONSE: u32 = 8;
+const MAX_IF_COND_COUNT: u32 = 5;
 
 #[derive(Debug, PartialEq, Snafu)]
 pub enum Error {
@@ -47,6 +48,9 @@ pub enum Error {
 
     #[snafu(display("The response to a command indicated an error."))]
     CommandResponse { source: ResponseError },
+
+    #[snafu(display("The SD card cannot be initilizationed and is unusable."))]
+    UnusableCard,
 }
 
 /// Power up sequence from section 6.4.1 of the Simplified Specification.
@@ -76,7 +80,10 @@ where
     // 2. GoIdleState
     cmds::go_idle_state(&mut command);
     execute_command(spi, &command)?;
+
     // 3. SendIfCond and check for illegal command (v1 card)
+    let _version = send_if_cond(spi)?;
+
     // 4. CrcOnOff to turn crc checking on
     // 5. ReadOcr and check for compatible voltage (or assume it is in range)
     // 6. SendOpCond (with HCR if not v1 card) repeatedly until not idle
@@ -107,8 +114,53 @@ where
         })
 }
 
-// TODO: remove this when it is no longer needed
-#[allow(dead_code)]
+fn send_if_cond<SPI>(spi: &mut SPI) -> Result<Version, Error>
+where
+    SPI: Write<u8> + Transfer<u8>,
+{
+    let mut command = [0; 6];
+    let check_pattern = constants::IF_COND_CHECK_PATTERN;
+
+    for _ in 0..MAX_IF_COND_COUNT {
+        let mut retry = false;
+
+        cmds::send_if_cond(check_pattern, &mut command);
+        let result = execute_command(spi, &command).map_or_else(
+            |e| {
+                if let Error::CommandResponse {
+                    source: ResponseError::IllegalCommand,
+                } = e
+                {
+                    Ok(Version::V1)
+                } else {
+                    Err(e)
+                }
+            },
+            |_r1| {
+                let r7 =
+                    R7Response::new(receive(spi)?, receive(spi)?, receive(spi)?, receive(spi)?);
+                if let Ok(()) = r7.check(check_pattern) {
+                    Ok(Version::V2)
+                } else {
+                    retry = true;
+                    Ok(Version::V2)
+                }
+            },
+        );
+
+        if !retry {
+            return result;
+        }
+    }
+
+    UnusableCardSnafu {}.fail()
+}
+
+enum Version {
+    V1,
+    V2,
+}
+
 fn execute_command<SPI>(spi: &mut SPI, cmd: &[u8]) -> Result<R1Response, Error>
 where
     SPI: Write<u8> + Transfer<u8>,
@@ -156,7 +208,7 @@ fn receive<SPI: Transfer<u8>>(spi: &mut SPI) -> Result<u8, Error> {
 mod test {
     use std::{io::ErrorKind, iter};
 
-    use crate::testutils::StubSpi;
+    use crate::{constants, testutils::StubSpi};
 
     use embedded_hal_mock::{delay, pin, spi, MockError};
 
@@ -278,5 +330,100 @@ mod test {
 
         spi.done();
         assert!(matches!(result, Err(Error::WaitForResponseTimeout)));
+    }
+
+    #[test]
+    fn send_if_cond_illegal_command_is_v1() {
+        let command = vec![0b0100_1000, 0, 0, constants::VOLTAGE_2_7_TO_3_6, 85, 117];
+        let expectations = [
+            spi::Transaction::transfer(vec![0xff], vec![0xff]),
+            spi::Transaction::write(command),
+            spi::Transaction::transfer(vec![0xff], vec![0b0000_0100]), // R1 with illegal command
+        ];
+        let mut spi = spi::Mock::new(&expectations);
+
+        let result = send_if_cond(&mut spi);
+
+        spi.done();
+        assert!(matches!(result, Ok(Version::V1)));
+    }
+
+    #[test]
+    fn send_if_cond_with_valid_r7_is_v2() {
+        let command = vec![0b0100_1000, 0, 0, constants::VOLTAGE_2_7_TO_3_6, 85, 117];
+        let expectations = [
+            spi::Transaction::transfer(vec![0xff], vec![0xff]),
+            spi::Transaction::write(command),
+            spi::Transaction::transfer(vec![0xff], vec![0]), // R1 (R7 byte 1)
+            spi::Transaction::transfer(vec![0xff], vec![0]), // R7 byte 2
+            spi::Transaction::transfer(vec![0xff], vec![0]), // R7 byte 3
+            spi::Transaction::transfer(vec![0xff], vec![constants::VOLTAGE_2_7_TO_3_6]), // R7 byte 4
+            spi::Transaction::transfer(vec![0xff], vec![85]), // R7 byte 5
+        ];
+        let mut spi = spi::Mock::new(&expectations);
+
+        let result = send_if_cond(&mut spi);
+
+        spi.done();
+        assert!(matches!(result, Ok(Version::V2)));
+    }
+
+    #[test]
+    fn send_if_cond_with_valid_r7_on_second_try_is_v2() {
+        let command = vec![0b0100_1000, 0, 0, constants::VOLTAGE_2_7_TO_3_6, 85, 117];
+        let expectations = [
+            spi::Transaction::transfer(vec![0xff], vec![0xff]),
+            spi::Transaction::write(command.clone()),
+            spi::Transaction::transfer(vec![0xff], vec![0]), // R1 (R7 byte 1)
+            spi::Transaction::transfer(vec![0xff], vec![0]), // R7 byte 2
+            spi::Transaction::transfer(vec![0xff], vec![0]), // R7 byte 3
+            spi::Transaction::transfer(vec![0xff], vec![constants::VOLTAGE_2_7_TO_3_6]), // R7 byte 4
+            spi::Transaction::transfer(vec![0xff], vec![12]), // R7 byte 5
+            spi::Transaction::transfer(vec![0xff], vec![0xff]),
+            spi::Transaction::write(command),
+            spi::Transaction::transfer(vec![0xff], vec![0]), // R1 (R7 byte 1)
+            spi::Transaction::transfer(vec![0xff], vec![0]), // R7 byte 2
+            spi::Transaction::transfer(vec![0xff], vec![0]), // R7 byte 3
+            spi::Transaction::transfer(vec![0xff], vec![constants::VOLTAGE_2_7_TO_3_6]), // R7 byte 4
+            spi::Transaction::transfer(vec![0xff], vec![85]), // R7 byte 5
+        ];
+        let mut spi = spi::Mock::new(&expectations);
+
+        let result = send_if_cond(&mut spi);
+
+        spi.done();
+        assert!(matches!(result, Ok(Version::V2)));
+    }
+
+    #[test]
+    fn send_if_cond_with_repeated_invalid_r7_is_unusable() {
+        let check_pattern = constants::IF_COND_CHECK_PATTERN;
+        let not_check_pattern = check_pattern + 5;
+        let command = vec![
+            0b0100_1000,
+            0,
+            0,
+            constants::VOLTAGE_2_7_TO_3_6,
+            check_pattern,
+            117,
+        ];
+        let mut expectations = Vec::new();
+        for _ in 0..MAX_IF_COND_COUNT {
+            expectations.extend([
+                spi::Transaction::transfer(vec![0xff], vec![0xff]),
+                spi::Transaction::write(command.clone()),
+                spi::Transaction::transfer(vec![0xff], vec![0]), // R1 (R7 byte 1)
+                spi::Transaction::transfer(vec![0xff], vec![0]), // R7 byte 2
+                spi::Transaction::transfer(vec![0xff], vec![0]), // R7 byte 3
+                spi::Transaction::transfer(vec![0xff], vec![constants::VOLTAGE_2_7_TO_3_6]), // R7 byte 4
+                spi::Transaction::transfer(vec![0xff], vec![not_check_pattern]), // R7 byte 5
+            ]);
+        }
+        let mut spi = spi::Mock::new(&expectations);
+
+        let result = send_if_cond(&mut spi);
+
+        spi.done();
+        assert!(matches!(result, Err(Error::UnusableCard)));
     }
 }

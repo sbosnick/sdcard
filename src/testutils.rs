@@ -13,6 +13,8 @@ use embedded_hal::{
     digital::v2::OutputPin,
 };
 
+use crate::constants;
+
 #[derive(Debug)]
 pub struct StubSpi;
 #[derive(Debug)]
@@ -59,11 +61,16 @@ impl Write<u8> for FakeCard {
         match self.state {
             State::Start => Ok(()),
             State::CommandPending if words[0] & 0b1100_0000 == 0b0100_0000 => {
-                self.state = State::ResponsePending;
+                if words[0] & 0b0011_1111 == 8 {
+                    self.state = State::R7ResponsePending(4);
+                } else {
+                    self.state = State::ResponsePending;
+                }
                 Ok(())
             }
             State::CommandPending => todo!(),
             State::ResponsePending => todo!(),
+            State::R7ResponsePending(_) => todo!(),
         }
     }
 }
@@ -85,6 +92,22 @@ impl Transfer<u8> for FakeCard {
                 words[0] = 0;
                 Ok(words)
             }
+            State::R7ResponsePending(byte) => {
+                self.state = if byte == 0 {
+                    State::Start
+                } else {
+                    State::R7ResponsePending(byte - 1)
+                };
+                words[0] = match byte {
+                    4 => 0,
+                    3 => 0,
+                    2 => 0,
+                    1 => constants::VOLTAGE_2_7_TO_3_6,
+                    0 => constants::IF_COND_CHECK_PATTERN,
+                    _ => panic!("unexpect byte count for R7 response"),
+                };
+                Ok(words)
+            }
         }
     }
 }
@@ -94,6 +117,7 @@ enum State {
     Start,
     CommandPending,
     ResponsePending,
+    R7ResponsePending(u8),
 }
 
 impl Default for State {
