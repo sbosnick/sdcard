@@ -20,7 +20,10 @@ use embedded_hal::{
 };
 use snafu::prelude::*;
 
-use crate::resp::{R1Response, ResponseError};
+use crate::{
+    cmds,
+    resp::{R1Response, ResponseError},
+};
 
 const WAIT_FOR_CARD_COUNT: u32 = 32_000;
 const MAX_WAIT_FOR_RESPONSE: u32 = 8;
@@ -64,8 +67,15 @@ pub fn power_up_card(
     Ok(())
 }
 
-pub fn initilization_flow<SPI>(_spi: &mut SPI) -> Result<(), Error> {
-    // 2. GoToIdle
+pub fn initilization_flow<SPI>(spi: &mut SPI) -> Result<(), Error>
+where
+    SPI: Write<u8> + Transfer<u8>,
+{
+    let mut command = [0; 6];
+
+    // 2. GoIdleState
+    cmds::go_idle_state(&mut command);
+    execute_command(spi, &command)?;
     // 3. SendIfCond and check for illegal command (v1 card)
     // 4. CrcOnOff to turn crc checking on
     // 5. ReadOcr and check for compatible voltage (or assume it is in range)

@@ -23,7 +23,10 @@ mod testutils;
 use core::fmt::Debug;
 
 use embedded_hal::{
-    blocking::{delay::DelayMs, spi::Write},
+    blocking::{
+        delay::DelayMs,
+        spi::{Transfer, Write},
+    },
     digital::v2::OutputPin,
 };
 use embedded_storage::{ReadStorage, Storage};
@@ -41,7 +44,7 @@ pub struct SDCard<SPI, CS> {
 
 impl<SPI, CS> SDCard<SPI, CS>
 where
-    SPI: Debug + Write<u8>,
+    SPI: Debug + Write<u8> + Transfer<u8>,
     CS: Debug + OutputPin,
 {
     /// Create a new [`SDCard`] using the given `SPI` interface and chip select.
@@ -141,7 +144,7 @@ mod tests {
 
     use embedded_hal_mock::delay;
 
-    use crate::testutils::{StubPin, StubSpi};
+    use crate::testutils::{FakeCard, StubPin};
 
     use super::*;
 
@@ -150,10 +153,11 @@ mod tests {
         let mut increased = false;
         let mut delay = delay::MockNoop::new();
 
-        let _ = SDCard::with_speed_increase(StubSpi, StubPin, &mut delay, |s| {
+        SDCard::with_speed_increase(FakeCard::default(), StubPin, &mut delay, |s| {
             increased = true;
             s
-        });
+        })
+        .expect("error initilizing the card");
 
         assert!(
             increased,
