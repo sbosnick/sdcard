@@ -6,7 +6,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms
 
-//! Functions and types related to initilization of an SD Card over SPI
+//! Functions and types related to transactions with an SD Card over SPI.
+//!
+//! The transactions include both those related to initilization and those
+//! related to data transfer (after initilization).
 
 use embedded_hal::{
     blocking::{
@@ -24,7 +27,7 @@ const MAX_WAIT_FOR_RESPONSE: u32 = 8;
 
 #[derive(Debug, PartialEq, Snafu)]
 pub enum Error {
-    #[snafu(display("Unable to set chip select state for SPI initilization."))]
+    #[snafu(display("Unable to set chip select state for SPI."))]
     ChipSelect,
 
     #[snafu(display("Unable to write to SPI."))]

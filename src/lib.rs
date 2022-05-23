@@ -14,8 +14,8 @@
 
 mod cmds;
 mod constants;
-mod initilization;
 mod resp;
+mod transactions;
 
 #[cfg(test)]
 mod testutils;
@@ -27,8 +27,8 @@ use embedded_hal::{
     digital::v2::OutputPin,
 };
 use embedded_storage::{ReadStorage, Storage};
-use initilization::{initilization_flow, power_up_card, with_cs_low};
 use snafu::{prelude::*, IntoError};
+use transactions::{initilization_flow, power_up_card, with_cs_low};
 
 /// An SD Card interface built from an SPI periferal and a Chip Select pin.
 ///
@@ -100,7 +100,7 @@ impl<SPI, CS> SDCard<SPI, CS> {
 #[derive(Debug, Snafu)]
 #[snafu(display("Unable to initilize the SD Card in SPI mode."))]
 pub struct InitilizationError<SPI: Debug, CS: Debug> {
-    source: initilization::Error,
+    source: transactions::Error,
     spi: SPI,
     cs: CS,
 }
