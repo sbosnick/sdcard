@@ -85,6 +85,9 @@ where
     let _version = send_if_cond(spi)?;
 
     // 4. CrcOnOff to turn crc checking on
+    cmds::crc_on_off(cmds::CrcOption::On, &mut command);
+    execute_command(spi, &command)?;
+
     // 5. ReadOcr and check for compatible voltage (or assume it is in range)
     // 6. SendOpCond (with HCR if not v1 card) repeatedly until not idle
     // 7. If not v1 card then ReadOcr and check card capacity
