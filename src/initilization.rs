@@ -17,14 +17,17 @@ use embedded_hal::{
 };
 use snafu::prelude::*;
 
+use crate::resp::{R1Response, ResponseError};
+
 const WAIT_FOR_CARD_COUNT: u32 = 32_000;
+const MAX_WAIT_FOR_RESPONSE: u32 = 8;
 
 #[derive(Debug, PartialEq, Snafu)]
 pub enum Error {
     #[snafu(display("Unable to set chip select state for SPI initilization."))]
     ChipSelect,
 
-    #[snafu(display("Unable to write to SPI for initilization."))]
+    #[snafu(display("Unable to write to SPI."))]
     SpiWrite,
 
     #[snafu(display("Unable to transfer to and from SPI."))]
@@ -32,6 +35,12 @@ pub enum Error {
 
     #[snafu(display("Timeout waiting for the card to be ready."))]
     WaitForCardTimeout,
+
+    #[snafu(display("Timeout waiting for the card to respond to a command."))]
+    WaitForResponseTimeout,
+
+    #[snafu(display("The response to a command indicated an error."))]
+    CommandResponse { source: ResponseError },
 }
 
 /// Power up sequence from section 6.4.1 of the Simplified Specification.
@@ -87,6 +96,28 @@ where
 
 // TODO: remove this when it is no longer needed
 #[allow(dead_code)]
+fn execute_command<SPI>(spi: &mut SPI, cmd: &[u8]) -> Result<R1Response, Error>
+where
+    SPI: Write<u8> + Transfer<u8>,
+{
+    debug_assert_eq!(cmd.len(), 6);
+
+    wait_for_card(spi)?;
+
+    spi.write(cmd).map_err(|_| SpiWriteSnafu {}.build())?;
+
+    for _ in 0..MAX_WAIT_FOR_RESPONSE {
+        let recv = receive(spi)?;
+        if recv != 0xff {
+            return Ok(R1Response::new(recv)
+                .check_error()
+                .context(CommandResponseSnafu {})?);
+        }
+    }
+
+    WaitForResponseTimeoutSnafu {}.fail()
+}
+
 fn wait_for_card<SPI: Transfer<u8>>(spi: &mut SPI) -> Result<(), Error> {
     for _ in 0..WAIT_FOR_CARD_COUNT {
         if receive(spi)? == 0xff {
@@ -180,5 +211,59 @@ mod test {
         let result = wait_for_card(&mut spi);
 
         assert_eq!(result, Err(Error::WaitForCardTimeout));
+    }
+
+    #[test]
+    fn execute_command_writes_command() {
+        let command = vec![0x01, 0x02, 0x03, 0x04, 0x05, 0x06];
+        let expectations = [
+            spi::Transaction::transfer(vec![0xff], vec![0xff]),
+            spi::Transaction::write(command.clone()),
+            spi::Transaction::transfer(vec![0xff], vec![0x00]),
+        ];
+        let mut spi = spi::Mock::new(&expectations);
+
+        execute_command(&mut spi, &command).expect("error executing command");
+
+        spi.done();
+    }
+
+    #[test]
+    fn execute_command_with_error_response_is_error() {
+        let command = vec![0x01, 0x02, 0x03, 0x04, 0x05, 0x06];
+        let expectations = [
+            spi::Transaction::transfer(vec![0xff], vec![0xff]),
+            spi::Transaction::write(command.clone()),
+            spi::Transaction::transfer(vec![0xff], vec![0b0100_0000]),
+        ];
+        let mut spi = spi::Mock::new(&expectations);
+
+        let result = execute_command(&mut spi, &command);
+
+        spi.done();
+        assert!(matches!(result, Err(Error::CommandResponse { source: _ })));
+    }
+
+    #[test]
+    fn execute_command_with_no_response_times_out() {
+        let command = vec![0x01, 0x02, 0x03, 0x04, 0x05, 0x06];
+        let expectations = [
+            spi::Transaction::transfer(vec![0xff], vec![0xff]),
+            spi::Transaction::write(command.clone()),
+            spi::Transaction::transfer(vec![0xff], vec![0xff]),
+            spi::Transaction::transfer(vec![0xff], vec![0xff]),
+            spi::Transaction::transfer(vec![0xff], vec![0xff]),
+            spi::Transaction::transfer(vec![0xff], vec![0xff]),
+            spi::Transaction::transfer(vec![0xff], vec![0xff]),
+            spi::Transaction::transfer(vec![0xff], vec![0xff]),
+            spi::Transaction::transfer(vec![0xff], vec![0xff]),
+            spi::Transaction::transfer(vec![0xff], vec![0xff]),
+        ];
+        let mut spi = spi::Mock::new(&expectations);
+
+        let result = execute_command(&mut spi, &command);
+
+        spi.done();
+        assert!(matches!(result, Err(Error::WaitForResponseTimeout)));
     }
 }
