@@ -21,13 +21,15 @@ use embedded_hal::{
 use snafu::prelude::*;
 
 use crate::{
-    cmds, constants,
+    cmds::{self, HostCapacitySupport},
+    constants,
     resp::{R1Response, R7Response, ResponseError},
 };
 
-const WAIT_FOR_CARD_COUNT: u32 = 32_000;
+const WAIT_FOR_CARD_COUNT: u32 = 32;
 const MAX_WAIT_FOR_RESPONSE: u32 = 8;
 const MAX_IF_COND_COUNT: u32 = 5;
+const MAX_OP_COND_COUNT: u32 = 3_200;
 
 #[derive(Debug, PartialEq, Snafu)]
 pub enum Error {
@@ -82,14 +84,18 @@ where
     execute_command(spi, &command)?;
 
     // 3. SendIfCond and check for illegal command (v1 card)
-    let _version = send_if_cond(spi)?;
+    let version = send_if_cond(spi)?;
 
     // 4. CrcOnOff to turn crc checking on
     cmds::crc_on_off(cmds::CrcOption::On, &mut command);
     execute_command(spi, &command)?;
 
     // 5. ReadOcr and check for compatible voltage (or assume it is in range)
+    // For now assume that the voltage is 3.3 V which is always supported.
+
     // 6. SendOpCond (with HCR if not v1 card) repeatedly until not idle
+    send_op_cond(spi, version)?;
+
     // 7. If not v1 card then ReadOcr and check card capacity
 
     // TODO: implement this
@@ -159,9 +165,42 @@ where
     UnusableCardSnafu {}.fail()
 }
 
+fn send_op_cond<SPI>(spi: &mut SPI, version: Version) -> Result<(), Error>
+where
+    SPI: Write<u8> + Transfer<u8>,
+{
+    let mut command = [0; 6];
+
+    for _ in 0..MAX_OP_COND_COUNT {
+        cmds::app_cmd(&mut command);
+        execute_command(spi, &command)?;
+
+        cmds::sd_send_op_cond(version.into(), &mut command);
+        let r1 = execute_command(spi, &command)?;
+
+        if r1 & R1Response::IDLE == R1Response::NONE {
+            return Ok(());
+        }
+
+        // TODO: use a DelayUs here
+    }
+
+    UnusableCardSnafu {}.fail()
+}
+
+#[derive(Debug, Clone, Copy)]
 enum Version {
     V1,
     V2,
+}
+
+impl From<Version> for HostCapacitySupport {
+    fn from(version: Version) -> Self {
+        match version {
+            Version::V1 => HostCapacitySupport::ScOnly,
+            Version::V2 => HostCapacitySupport::HcOrXcSupported,
+        }
+    }
 }
 
 fn execute_command<SPI>(spi: &mut SPI, cmd: &[u8]) -> Result<R1Response, Error>
@@ -428,5 +467,91 @@ mod test {
 
         spi.done();
         assert!(matches!(result, Err(Error::UnusableCard)));
+    }
+
+    #[test]
+    fn send_op_cond_for_v1_supports_sdsc_as_expected() {
+        let app_cmd = vec![0b0111_0111, 0, 0, 0, 0, 101];
+        let op_cond_cmd = vec![0b0110_1001, 0b0000_0000, 0, 0, 0, 229];
+        let expectations = [
+            spi::Transaction::transfer(vec![0xff], vec![0xff]),
+            spi::Transaction::write(app_cmd),
+            spi::Transaction::transfer(vec![0xff], vec![0]), // R1 with no error and not idle
+            spi::Transaction::transfer(vec![0xff], vec![0xff]),
+            spi::Transaction::write(op_cond_cmd),
+            spi::Transaction::transfer(vec![0xff], vec![0]), // R1 with no error and not idle
+        ];
+        let mut spi = spi::Mock::new(&expectations);
+
+        send_op_cond(&mut spi, Version::V1).expect("Unable to send op cond.");
+
+        spi.done();
+    }
+
+    #[test]
+    fn send_op_cond_for_v2_supports_hc_and_xc_as_expected() {
+        let app_cmd = vec![0b0111_0111, 0, 0, 0, 0, 101];
+        let op_cond_cmd = vec![0b0110_1001, 0b0100_0000, 0, 0, 0, 119];
+        let expectations = [
+            spi::Transaction::transfer(vec![0xff], vec![0xff]),
+            spi::Transaction::write(app_cmd),
+            spi::Transaction::transfer(vec![0xff], vec![0]), // R1 with no error and not idle
+            spi::Transaction::transfer(vec![0xff], vec![0xff]),
+            spi::Transaction::write(op_cond_cmd),
+            spi::Transaction::transfer(vec![0xff], vec![0]), // R1 with no error and not idle
+        ];
+        let mut spi = spi::Mock::new(&expectations);
+
+        send_op_cond(&mut spi, Version::V2).expect("Unable to send op cond.");
+
+        spi.done();
+    }
+
+    #[test]
+    fn send_op_cond_with_idle_response_repeats() {
+        let app_cmd = vec![0b0111_0111, 0, 0, 0, 0, 101];
+        let op_cond_cmd = vec![0b0110_1001, 0b0100_0000, 0, 0, 0, 119];
+        let expectations = [
+            spi::Transaction::transfer(vec![0xff], vec![0xff]),
+            spi::Transaction::write(app_cmd.clone()),
+            spi::Transaction::transfer(vec![0xff], vec![0b0000_0001]), // R1 with no error and idle
+            spi::Transaction::transfer(vec![0xff], vec![0xff]),
+            spi::Transaction::write(op_cond_cmd.clone()),
+            spi::Transaction::transfer(vec![0xff], vec![0b0000_0001]), // R1 with no error and idle
+            spi::Transaction::transfer(vec![0xff], vec![0xff]),
+            spi::Transaction::write(app_cmd),
+            spi::Transaction::transfer(vec![0xff], vec![0b0000_0001]), // R1 with no error and idle
+            spi::Transaction::transfer(vec![0xff], vec![0xff]),
+            spi::Transaction::write(op_cond_cmd),
+            spi::Transaction::transfer(vec![0xff], vec![0b0000_0000]), // R1 with no error and not idle
+        ];
+        let mut spi = spi::Mock::new(&expectations);
+
+        send_op_cond(&mut spi, Version::V2).expect("Unable to send op cond.");
+
+        spi.done();
+    }
+
+    #[test]
+    fn send_op_cond_with_repeated_idle_response_is_unuable() {
+        let app_cmd = vec![0b0111_0111, 0, 0, 0, 0, 101];
+        let op_cond_cmd = vec![0b0110_1001, 0b0100_0000, 0, 0, 0, 119];
+        let mut expectations = Vec::new();
+        for _ in 0..MAX_OP_COND_COUNT {
+            expectations.extend([
+                spi::Transaction::transfer(vec![0xff], vec![0xff]),
+                spi::Transaction::write(app_cmd.clone()),
+                spi::Transaction::transfer(vec![0xff], vec![0b0000_0001]), // R1 with no error and idle
+                spi::Transaction::transfer(vec![0xff], vec![0xff]),
+                spi::Transaction::write(op_cond_cmd.clone()),
+                spi::Transaction::transfer(vec![0xff], vec![0b0000_0001]), // R1 with no error and idle
+            ]);
+        }
+        let mut spi = spi::Mock::new(&expectations);
+
+        let result = send_op_cond(&mut spi, Version::V2);
+
+        spi.done();
+        assert_eq!(result, Err(Error::UnusableCard));
     }
 }
