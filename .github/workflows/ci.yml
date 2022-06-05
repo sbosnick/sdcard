@@ -43,5 +43,5 @@ jobs:
         run: nix build --log-format raw -L .#ci-${{ matrix.rust-version }}
 
       - name: Extra Checks
-        if: matrix.rust == 'stable'
+        if: matrix.rust-version == 'stable'
         run: nix flake check --log-format raw -L
