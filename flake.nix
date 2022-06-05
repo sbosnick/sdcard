@@ -1,5 +1,5 @@
 {
-  description = "A Generic Rust Library";
+  description = "An embedded-hal driver for SD Cards";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
