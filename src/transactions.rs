@@ -116,10 +116,10 @@ where
                 .map(|_| o)
                 .map_err(|_| ChipSelectSnafu {}.build())
         })
-        .or_else(|e| {
+        .map_err(|e| {
             // ignore the error to give priority to the error from f(spi)
             let _ = cs.set_high();
-            Err(e)
+            e
         })
 }
 
@@ -216,9 +216,9 @@ where
     for _ in 0..MAX_WAIT_FOR_RESPONSE {
         let recv = receive(spi)?;
         if recv != 0xff {
-            return Ok(R1Response::new(recv)
+            return R1Response::new(recv)
                 .check_error()
-                .context(CommandResponseSnafu {})?);
+                .context(CommandResponseSnafu {});
         }
     }
 

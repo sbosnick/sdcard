@@ -137,7 +137,7 @@ trait Encode: Copy {
         buffer[1] = (arg >> 24) as u8;
         buffer[2] = (arg >> 16) as u8;
         buffer[3] = (arg >> 8) as u8;
-        buffer[4] = (arg >> 0) as u8;
+        buffer[4] = arg as u8;
         buffer[5] = encode_end_byte(&buffer[0..5]);
     }
 }
@@ -147,7 +147,7 @@ fn encode_end_byte(bytes: &[u8]) -> u8 {
 }
 
 impl HostCapacitySupport {
-    fn to_arg(self) -> u32 {
+    fn to_arg(&self) -> u32 {
         const HCR_BIT: u32 = 0b0100_0000_0000_0000_0000_0000_0000_0000;
         match self {
             HostCapacitySupport::ScOnly => 0,
@@ -157,7 +157,7 @@ impl HostCapacitySupport {
 }
 
 impl CrcOption {
-    fn to_arg(self) -> u32 {
+    fn to_arg(&self) -> u32 {
         match self {
             CrcOption::On => 0x0000_0001,
             CrcOption::Off => 0x0000_0000,
