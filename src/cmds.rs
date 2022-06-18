@@ -13,30 +13,22 @@ use crc::{Crc, CRC_7_MMC};
 use crate::common::VOLTAGE_2_7_TO_3_6;
 
 /// Encode a GoIdleState command
-// TODO: remove this when it is no longer needed
-#[allow(dead_code)]
 pub fn go_idle_state(buffer: &mut [u8]) {
     Cmd::GoIdleState.encode(0, buffer)
 }
 
 /// Encode a SendIfCond command assuming  2.7-3.6 V as the voltage supplied.
-// TODO: remove this when it is no longer needed
-#[allow(dead_code)]
 pub fn send_if_cond(check_pattern: u8, buffer: &mut [u8]) {
     let vhs: u32 = VOLTAGE_2_7_TO_3_6.into();
     Cmd::SendIfCond.encode((vhs << 8) | (check_pattern as u32), buffer)
 }
 
 /// Encode an AppCmd command. The next command should be an application command.
-// TODO: remove this when it is no longer needed
-#[allow(dead_code)]
 pub fn app_cmd(buffer: &mut [u8]) {
     Cmd::AppCmd.encode(0, buffer);
 }
 
 /// Encode an SdSendOpCond app command.
-// TODO: remove this when it is no longer needed
-#[allow(dead_code)]
 pub fn sd_send_op_cond(hcs: HostCapacitySupport, buffer: &mut [u8]) {
     AppCmd::SdSendOpCond.encode(hcs.to_arg(), buffer);
 }
@@ -51,9 +43,7 @@ pub enum HostCapacitySupport {
     HcOrXcSupported,
 }
 
-// Encode a CRCOnOff command.
-// TODO: remove this when it is no longer needed
-#[allow(dead_code)]
+/// Encode a CRCOnOff command.
 pub fn crc_on_off(option: CrcOption, buffer: &mut [u8]) {
     Cmd::CRCOnOff.encode(option.to_arg(), buffer)
 }

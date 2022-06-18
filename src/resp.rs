@@ -84,8 +84,6 @@ pub enum ResponseError {
 }
 
 impl R1Response {
-    // TODO: remove this when it is no longer needed
-    #[allow(dead_code)]
     pub fn new(value: u8) -> Self {
         Self(value)
     }
