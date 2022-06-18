@@ -24,3 +24,18 @@ pub const VOLTAGE_2_7_TO_3_6: u8 = 0b0001;
 ///
 /// This could be any value but this the one we picked.
 pub const IF_COND_CHECK_PATTERN: u8 = 0b0101_0101;
+
+/// The card capacity classification from section 3.3.2.
+///
+/// Note that Ultra Capacity (SDUC) cards are not supported in SPI mode
+/// (see section 7.1) so there is no entry for them here.
+// TODO: removed this when it is no longer needed
+#[allow(dead_code)]
+#[derive(Debug, PartialEq)]
+pub enum CardCapacity {
+    /// SDSC card
+    Standard,
+
+    /// SDHC or SDXC card
+    HighOrExtended,
+}

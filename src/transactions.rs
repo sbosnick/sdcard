@@ -22,7 +22,7 @@ use snafu::prelude::*;
 
 use crate::{
     cmds::{self, HostCapacitySupport},
-    constants,
+    constants::{self, CardCapacity},
     resp::{R1Response, R7Response, ResponseError},
 };
 
@@ -53,20 +53,6 @@ pub enum Error {
 
     #[snafu(display("The SD card cannot be initilizationed and is unusable."))]
     UnusableCard,
-}
-
-/// The card capacity classification from section 3.3.2.
-///
-/// Note that Ultra Capacity (SDUC) cards are not supported in SPI mode
-/// (see section 7.1) so there is no entry for them here.
-// TODO: removed this when it is no longer needed
-#[allow(dead_code)]
-pub enum CardCapacity {
-    /// SDSC card
-    Standard,
-
-    /// SDHC or SDXC card
-    HighOrExtended,
 }
 
 /// Power up sequence from section 6.4.1 of the Simplified Specification.

@@ -18,18 +18,18 @@
 //! be sent from the card.
 //!
 //! The non-R1 responses currently implmented are:
+//!     - R3
 //!     - R7
 //!
 //! The non-R1 responses that are not yet implemented are:
 //!     - R1b
 //!     - R2
-//!     - R3
 
 use core::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign};
 
 use snafu::{ensure, Snafu};
 
-use crate::constants::VOLTAGE_2_7_TO_3_6;
+use crate::constants::{CardCapacity, VOLTAGE_2_7_TO_3_6};
 
 /// Newtype to support decoding of an R1 response.
 ///
@@ -44,9 +44,20 @@ pub struct R1Response(u8);
 /// bytes of the R7 response (after the R1 byte) will not be present if
 /// [`R1Response::response_truncated`] is true.
 ///
-/// This type is based on sectin 7.3.2.6 of the Simplified Specification.
+/// This type is based on section 7.3.2.6 of the Simplified Specification.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct R7Response(u32);
+
+/// Newtype to support decoding the R3 response (and the OCR register).
+///
+/// This type decodes the last 4 bytes of the R3 response. The first byte
+/// is an R1 response that should be decided with [`R1Response`]. The remaining
+/// bytes of the R3 response (after the R1 byte) will not be present if
+/// [`R1Response::response_truncated`] is true.
+///
+/// This type is based on section 7.3.2.4 of the Simplified Specification.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct R3Response(u32);
 
 #[derive(Debug, PartialEq, Snafu)]
 pub enum ResponseError {
@@ -110,6 +121,31 @@ impl R1Response {
 
     fn is_set(self, rhs: Self) -> bool {
         (self & rhs) != Self::NONE
+    }
+}
+
+impl R3Response {
+    // TODO: remove this when it is no longer needed
+    #[allow(dead_code)]
+    pub fn new(byte2: u8, byte3: u8, byte4: u8, byte5: u8) -> Self {
+        let b2: u32 = byte2 as u32;
+        let b3: u32 = byte3 as u32;
+        let b4: u32 = byte4 as u32;
+        let b5: u32 = byte5 as u32;
+
+        R3Response((b2 << 24) | (b3 << 16) | (b4 << 8) | b5)
+    }
+
+    // TODO: remove this when it is no longer needed
+    #[allow(dead_code)]
+    pub fn card_capacity(&self) -> CardCapacity {
+        const CSS: u32 = 0b0100_0000_0000_0000_0000_0000_0000_0000;
+
+        if self.0 & CSS == 0 {
+            CardCapacity::Standard
+        } else {
+            CardCapacity::HighOrExtended
+        }
     }
 }
 
@@ -283,5 +319,19 @@ mod tests {
         let result = r7.check(check_pattern);
 
         assert_eq!(result, Ok(()));
+    }
+
+    #[test]
+    fn r3_with_ccs_set_gives_expected_capacity() {
+        let r3 = R3Response::new(0b0100_0000, 0, 0, 0);
+
+        assert_eq!(r3.card_capacity(), CardCapacity::HighOrExtended);
+    }
+
+    #[test]
+    fn r3_with_css_unset_gives_expected_capacity() {
+        let r3 = R3Response::new(0, 0, 0, 0);
+
+        assert_eq!(r3.card_capacity(), CardCapacity::Standard);
     }
 }

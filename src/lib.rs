@@ -22,6 +22,7 @@ mod testutils;
 
 use core::fmt::Debug;
 
+use constants::CardCapacity;
 use embedded_hal::{
     blocking::{
         delay::DelayMs,
@@ -31,7 +32,7 @@ use embedded_hal::{
 };
 use embedded_storage::{ReadStorage, Storage};
 use snafu::{prelude::*, IntoError};
-use transactions::{initilization_flow, power_up_card, with_cs_low, CardCapacity};
+use transactions::{initilization_flow, power_up_card, with_cs_low};
 
 /// An SD Card interface built from an SPI periferal and a Chip Select pin.
 ///
