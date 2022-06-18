@@ -55,6 +55,20 @@ pub enum Error {
     UnusableCard,
 }
 
+/// The card capacity classification from section 3.3.2.
+///
+/// Note that Ultra Capacity (SDUC) cards are not supported in SPI mode
+/// (see section 7.1) so there is no entry for them here.
+// TODO: removed this when it is no longer needed
+#[allow(dead_code)]
+pub enum CardCapacity {
+    /// SDSC card
+    Standard,
+
+    /// SDHC or SDXC card
+    HighOrExtended,
+}
+
 /// Power up sequence from section 6.4.1 of the Simplified Specification.
 pub fn power_up_card(
     spi: &mut impl Write<u8>,
@@ -73,7 +87,7 @@ pub fn power_up_card(
     Ok(())
 }
 
-pub fn initilization_flow<SPI>(spi: &mut SPI) -> Result<(), Error>
+pub fn initilization_flow<SPI>(spi: &mut SPI) -> Result<CardCapacity, Error>
 where
     SPI: Write<u8> + Transfer<u8>,
 {
@@ -97,9 +111,9 @@ where
     send_op_cond(spi, version)?;
 
     // 7. If not v1 card then ReadOcr and check card capacity
-
     // TODO: implement this
-    Ok(())
+
+    Ok(CardCapacity::Standard)
 }
 
 pub fn with_cs_low<CS, SPI, F, O>(cs: &mut CS, spi: &mut SPI, f: F) -> Result<O, Error>

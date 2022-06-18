@@ -31,7 +31,7 @@ use embedded_hal::{
 };
 use embedded_storage::{ReadStorage, Storage};
 use snafu::{prelude::*, IntoError};
-use transactions::{initilization_flow, power_up_card, with_cs_low};
+use transactions::{initilization_flow, power_up_card, with_cs_low, CardCapacity};
 
 /// An SD Card interface built from an SPI periferal and a Chip Select pin.
 ///
@@ -40,6 +40,9 @@ use transactions::{initilization_flow, power_up_card, with_cs_low};
 pub struct SDCard<SPI, CS> {
     spi: SPI,
     cs: CS,
+    // TODO: removed this when it is no longer needed
+    #[allow(dead_code)]
+    capacity: CardCapacity,
 }
 
 impl<SPI, CS> SDCard<SPI, CS>
@@ -82,10 +85,10 @@ where
             .and_then(|_| with_cs_low(&mut cs, &mut spi, initilization_flow));
 
         match result {
-            Ok(()) => {
+            Ok(capacity) => {
                 // 8. (optional) Increase frequency of the SPI
                 let spi = increase_speed(spi);
-                Ok(Self { cs, spi })
+                Ok(Self { cs, spi, capacity })
             }
             Err(e) => Err(InitilizationSnafu { cs, spi }.into_error(e)),
         }
@@ -173,6 +176,7 @@ mod tests {
         let sut = SDCard {
             spi: spi.clone(),
             cs: cs.clone(),
+            capacity: CardCapacity::Standard,
         };
         let (rel_spi, rel_cs) = sut.release();
 
