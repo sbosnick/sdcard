@@ -13,7 +13,7 @@
 #![deny(missing_docs, warnings)]
 
 mod cmds;
-mod constants;
+mod common;
 mod resp;
 mod transactions;
 
@@ -22,7 +22,7 @@ mod testutils;
 
 use core::fmt::Debug;
 
-use constants::CardCapacity;
+use common::CardCapacity;
 use embedded_hal::{
     blocking::{
         delay::DelayMs,

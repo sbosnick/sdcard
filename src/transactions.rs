@@ -22,7 +22,7 @@ use snafu::prelude::*;
 
 use crate::{
     cmds::{self, HostCapacitySupport},
-    constants::{self, CardCapacity},
+    common::{self, CardCapacity},
     resp::{R1Response, R7Response, ResponseError},
 };
 
@@ -128,7 +128,7 @@ where
     SPI: Write<u8> + Transfer<u8>,
 {
     let mut command = [0; 6];
-    let check_pattern = constants::IF_COND_CHECK_PATTERN;
+    let check_pattern = common::IF_COND_CHECK_PATTERN;
 
     for _ in 0..MAX_IF_COND_COUNT {
         let mut retry = false;
@@ -250,7 +250,7 @@ fn receive<SPI: Transfer<u8>>(spi: &mut SPI) -> Result<u8, Error> {
 mod test {
     use std::{io::ErrorKind, iter};
 
-    use crate::{constants, testutils::StubSpi};
+    use crate::{common, testutils::StubSpi};
 
     use embedded_hal_mock::{delay, pin, spi, MockError};
 
@@ -376,7 +376,7 @@ mod test {
 
     #[test]
     fn send_if_cond_illegal_command_is_v1() {
-        let command = vec![0b0100_1000, 0, 0, constants::VOLTAGE_2_7_TO_3_6, 85, 117];
+        let command = vec![0b0100_1000, 0, 0, common::VOLTAGE_2_7_TO_3_6, 85, 117];
         let expectations = [
             spi::Transaction::transfer(vec![0xff], vec![0xff]),
             spi::Transaction::write(command),
@@ -392,14 +392,14 @@ mod test {
 
     #[test]
     fn send_if_cond_with_valid_r7_is_v2() {
-        let command = vec![0b0100_1000, 0, 0, constants::VOLTAGE_2_7_TO_3_6, 85, 117];
+        let command = vec![0b0100_1000, 0, 0, common::VOLTAGE_2_7_TO_3_6, 85, 117];
         let expectations = [
             spi::Transaction::transfer(vec![0xff], vec![0xff]),
             spi::Transaction::write(command),
             spi::Transaction::transfer(vec![0xff], vec![0]), // R1 (R7 byte 1)
             spi::Transaction::transfer(vec![0xff], vec![0]), // R7 byte 2
             spi::Transaction::transfer(vec![0xff], vec![0]), // R7 byte 3
-            spi::Transaction::transfer(vec![0xff], vec![constants::VOLTAGE_2_7_TO_3_6]), // R7 byte 4
+            spi::Transaction::transfer(vec![0xff], vec![common::VOLTAGE_2_7_TO_3_6]), // R7 byte 4
             spi::Transaction::transfer(vec![0xff], vec![85]), // R7 byte 5
         ];
         let mut spi = spi::Mock::new(&expectations);
@@ -412,21 +412,21 @@ mod test {
 
     #[test]
     fn send_if_cond_with_valid_r7_on_second_try_is_v2() {
-        let command = vec![0b0100_1000, 0, 0, constants::VOLTAGE_2_7_TO_3_6, 85, 117];
+        let command = vec![0b0100_1000, 0, 0, common::VOLTAGE_2_7_TO_3_6, 85, 117];
         let expectations = [
             spi::Transaction::transfer(vec![0xff], vec![0xff]),
             spi::Transaction::write(command.clone()),
             spi::Transaction::transfer(vec![0xff], vec![0]), // R1 (R7 byte 1)
             spi::Transaction::transfer(vec![0xff], vec![0]), // R7 byte 2
             spi::Transaction::transfer(vec![0xff], vec![0]), // R7 byte 3
-            spi::Transaction::transfer(vec![0xff], vec![constants::VOLTAGE_2_7_TO_3_6]), // R7 byte 4
+            spi::Transaction::transfer(vec![0xff], vec![common::VOLTAGE_2_7_TO_3_6]), // R7 byte 4
             spi::Transaction::transfer(vec![0xff], vec![12]), // R7 byte 5
             spi::Transaction::transfer(vec![0xff], vec![0xff]),
             spi::Transaction::write(command),
             spi::Transaction::transfer(vec![0xff], vec![0]), // R1 (R7 byte 1)
             spi::Transaction::transfer(vec![0xff], vec![0]), // R7 byte 2
             spi::Transaction::transfer(vec![0xff], vec![0]), // R7 byte 3
-            spi::Transaction::transfer(vec![0xff], vec![constants::VOLTAGE_2_7_TO_3_6]), // R7 byte 4
+            spi::Transaction::transfer(vec![0xff], vec![common::VOLTAGE_2_7_TO_3_6]), // R7 byte 4
             spi::Transaction::transfer(vec![0xff], vec![85]), // R7 byte 5
         ];
         let mut spi = spi::Mock::new(&expectations);
@@ -439,13 +439,13 @@ mod test {
 
     #[test]
     fn send_if_cond_with_repeated_invalid_r7_is_unusable() {
-        let check_pattern = constants::IF_COND_CHECK_PATTERN;
+        let check_pattern = common::IF_COND_CHECK_PATTERN;
         let not_check_pattern = check_pattern + 5;
         let command = vec![
             0b0100_1000,
             0,
             0,
-            constants::VOLTAGE_2_7_TO_3_6,
+            common::VOLTAGE_2_7_TO_3_6,
             check_pattern,
             117,
         ];
@@ -457,7 +457,7 @@ mod test {
                 spi::Transaction::transfer(vec![0xff], vec![0]), // R1 (R7 byte 1)
                 spi::Transaction::transfer(vec![0xff], vec![0]), // R7 byte 2
                 spi::Transaction::transfer(vec![0xff], vec![0]), // R7 byte 3
-                spi::Transaction::transfer(vec![0xff], vec![constants::VOLTAGE_2_7_TO_3_6]), // R7 byte 4
+                spi::Transaction::transfer(vec![0xff], vec![common::VOLTAGE_2_7_TO_3_6]), // R7 byte 4
                 spi::Transaction::transfer(vec![0xff], vec![not_check_pattern]), // R7 byte 5
             ]);
         }

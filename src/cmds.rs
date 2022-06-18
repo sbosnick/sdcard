@@ -10,7 +10,7 @@
 
 use crc::{Crc, CRC_7_MMC};
 
-use crate::constants::VOLTAGE_2_7_TO_3_6;
+use crate::common::VOLTAGE_2_7_TO_3_6;
 
 /// Encode a GoIdleState command
 // TODO: remove this when it is no longer needed

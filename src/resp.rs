@@ -29,7 +29,7 @@ use core::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign};
 
 use snafu::{ensure, Snafu};
 
-use crate::constants::{CardCapacity, VOLTAGE_2_7_TO_3_6};
+use crate::common::{CardCapacity, VOLTAGE_2_7_TO_3_6};
 
 /// Newtype to support decoding of an R1 response.
 ///

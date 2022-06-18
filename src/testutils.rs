@@ -13,7 +13,7 @@ use embedded_hal::{
     digital::v2::OutputPin,
 };
 
-use crate::constants;
+use crate::common;
 
 #[derive(Debug)]
 pub struct StubSpi;
@@ -102,8 +102,8 @@ impl Transfer<u8> for FakeCard {
                     4 => 0,
                     3 => 0,
                     2 => 0,
-                    1 => constants::VOLTAGE_2_7_TO_3_6,
-                    0 => constants::IF_COND_CHECK_PATTERN,
+                    1 => common::VOLTAGE_2_7_TO_3_6,
+                    0 => common::IF_COND_CHECK_PATTERN,
                     _ => panic!("unexpect byte count for R7 response"),
                 };
                 Ok(words)
