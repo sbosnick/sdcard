@@ -187,16 +187,7 @@ where
             let mut command = [0; 6];
 
             cmds::read_ocr(&mut command);
-            let r1 = execute_command(spi, &command)?;
-            // TODO: handle the non-truncate error case
-            let r3 = R3Response::new(
-                receive(spi)?,
-                receive(spi)?,
-                receive(spi)?,
-                receive(spi)?,
-                r1,
-            );
-            Ok(r3.card_capacity())
+            R3Response::execute_command(spi, &command).map(|r3| r3.card_capacity())
         }
     }
 }
