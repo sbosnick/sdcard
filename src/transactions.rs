@@ -132,37 +132,19 @@ where
         let mut retry = false;
 
         cmds::send_if_cond(check_pattern, &mut command);
-        let result = match execute_command(spi, &command) {
-            Ok(r1) => {
-                let r7 = R7Response::new(
-                    receive(spi)?,
-                    receive(spi)?,
-                    receive(spi)?,
-                    receive(spi)?,
-                    r1,
-                );
-                if let Ok(()) = r7.check(check_pattern) {
-                    Ok(Version::V2)
-                } else {
+        let result = R7Response::execute_command(spi, &command)
+            .map(|r7| {
+                if r7.check(check_pattern).is_err() {
                     retry = true;
-                    Ok(Version::V2)
                 }
-            }
-            Err(Error::CommandResponse { source }) => {
-                if source == ResponseError::IllegalCommand {
+                Version::V2
+            })
+            .or_else(|err| match err {
+                Error::CommandResponse { source } if source == ResponseError::IllegalCommand => {
                     Ok(Version::V1)
-                } else {
-                    if source != ResponseError::ComCrcError {
-                        // read and discard the other 4 bytes
-                        for _ in 0..4 {
-                            let _ = receive(spi);
-                        }
-                    }
-                    Err(Error::CommandResponse { source })
                 }
-            }
-            Err(e) => Err(e),
-        };
+                _ => Err(err),
+            });
 
         if !retry {
             return result;

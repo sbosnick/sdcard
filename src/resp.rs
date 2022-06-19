@@ -116,8 +116,6 @@ impl R1Response {
         Ok(self)
     }
 
-    // TODO: remove this when it is no longer needed
-    #[allow(dead_code)]
     pub fn response_truncated(self) -> bool {
         self.is_set(Self::ILLEGAL_COMMAND) || self.is_set(Self::COM_CRC_ERROR)
     }
@@ -183,7 +181,7 @@ impl Response for R3Response {
 }
 
 impl R7Response {
-    pub fn new(byte2: u8, byte3: u8, byte4: u8, byte5: u8, r1: R1Response) -> Self {
+    fn new(byte2: u8, byte3: u8, byte4: u8, byte5: u8, r1: R1Response) -> Self {
         let b2: u32 = byte2 as u32;
         let b3: u32 = byte3 as u32;
         let b4: u32 = byte4 as u32;
