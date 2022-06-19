@@ -23,7 +23,7 @@ use snafu::prelude::*;
 use crate::{
     cmds::{self, HostCapacitySupport},
     common::{self, CardCapacity},
-    resp::{R1Response, R3Response, R7Response, ResponseError},
+    resp::{R1Response, R3Response, R7Response, Response, ResponseError},
 };
 
 const WAIT_FOR_CARD_COUNT: u32 = 32;
@@ -133,9 +133,14 @@ where
 
         cmds::send_if_cond(check_pattern, &mut command);
         let result = match execute_command(spi, &command) {
-            Ok(_) => {
-                let r7 =
-                    R7Response::new(receive(spi)?, receive(spi)?, receive(spi)?, receive(spi)?);
+            Ok(r1) => {
+                let r7 = R7Response::new(
+                    receive(spi)?,
+                    receive(spi)?,
+                    receive(spi)?,
+                    receive(spi)?,
+                    r1,
+                );
                 if let Ok(()) = r7.check(check_pattern) {
                     Ok(Version::V2)
                 } else {
@@ -200,9 +205,15 @@ where
             let mut command = [0; 6];
 
             cmds::read_ocr(&mut command);
-            execute_command(spi, &command)?;
+            let r1 = execute_command(spi, &command)?;
             // TODO: handle the non-truncate error case
-            let r3 = R3Response::new(receive(spi)?, receive(spi)?, receive(spi)?, receive(spi)?);
+            let r3 = R3Response::new(
+                receive(spi)?,
+                receive(spi)?,
+                receive(spi)?,
+                receive(spi)?,
+                r1,
+            );
             Ok(r3.card_capacity())
         }
     }
@@ -227,22 +238,49 @@ fn execute_command<SPI>(spi: &mut SPI, cmd: &[u8]) -> Result<R1Response, Error>
 where
     SPI: Write<u8> + Transfer<u8>,
 {
-    debug_assert_eq!(cmd.len(), 6);
+    R1Response::execute_command(spi, cmd)
+}
 
-    wait_for_card(spi)?;
+trait Execute
+where
+    Self: Sized,
+{
+    fn execute_command<SPI>(spi: &mut SPI, cmd: &[u8]) -> Result<Self, Error>
+    where
+        SPI: Write<u8> + Transfer<u8>;
+}
 
-    spi.write(cmd).map_err(|_| SpiWriteSnafu {}.build())?;
+impl<R: Response> Execute for R {
+    fn execute_command<SPI>(spi: &mut SPI, cmd: &[u8]) -> Result<Self, Error>
+    where
+        SPI: Write<u8> + Transfer<u8>,
+    {
+        debug_assert_eq!(cmd.len(), 6);
 
-    for _ in 0..MAX_WAIT_FOR_RESPONSE {
-        let recv = receive(spi)?;
-        if recv != 0xff {
-            return R1Response::new(recv)
-                .check_error()
-                .context(CommandResponseSnafu {});
+        wait_for_card(spi)?;
+
+        spi.write(cmd).map_err(|_| SpiWriteSnafu {}.build())?;
+
+        for _ in 0..MAX_WAIT_FOR_RESPONSE {
+            let recv = receive(spi)?;
+            if recv != 0xff {
+                let r1 = R1Response::new(recv);
+                let mut extra = R::ExtraBytes::default();
+                if !r1.response_truncated() {
+                    for e in extra.as_mut().iter_mut() {
+                        *e = receive(spi)?;
+                    }
+                }
+
+                return r1
+                    .check_error()
+                    .context(CommandResponseSnafu {})
+                    .map(|r1| R::create(r1, &extra));
+            }
         }
-    }
 
-    WaitForResponseTimeoutSnafu {}.fail()
+        WaitForResponseTimeoutSnafu {}.fail()
+    }
 }
 
 fn wait_for_card<SPI: Transfer<u8>>(spi: &mut SPI) -> Result<(), Error> {
@@ -392,6 +430,59 @@ mod test {
 
         spi.done();
         assert!(matches!(result, Err(Error::WaitForResponseTimeout)));
+    }
+
+    #[test]
+    fn r7_execute_command_does_not_recv_extra_bytes_for_truncated_r1() {
+        let command = vec![0b0100_1000, 0, 0, common::VOLTAGE_2_7_TO_3_6, 85, 117];
+        let expectations = [
+            spi::Transaction::transfer(vec![0xff], vec![0xff]),
+            spi::Transaction::write(command.clone()),
+            spi::Transaction::transfer(vec![0xff], vec![0b0000_0100]), // R1 with illegal command
+        ];
+        let mut spi = spi::Mock::new(&expectations);
+
+        let _result = R7Response::execute_command(&mut spi, &command);
+
+        spi.done();
+    }
+
+    #[test]
+    fn r7_exectute_command_recv_extra_bytes_for_non_error_r1() {
+        let command = vec![0b0100_1000, 0, 0, common::VOLTAGE_2_7_TO_3_6, 85, 117];
+        let expectations = [
+            spi::Transaction::transfer(vec![0xff], vec![0xff]),
+            spi::Transaction::write(command.clone()),
+            spi::Transaction::transfer(vec![0xff], vec![0b0000_0000]),
+            spi::Transaction::transfer(vec![0xff], vec![0x00]),
+            spi::Transaction::transfer(vec![0xff], vec![0x00]),
+            spi::Transaction::transfer(vec![0xff], vec![0x00]),
+            spi::Transaction::transfer(vec![0xff], vec![0x00]),
+        ];
+        let mut spi = spi::Mock::new(&expectations);
+
+        let _result = R7Response::execute_command(&mut spi, &command);
+
+        spi.done();
+    }
+
+    #[test]
+    fn r7_execute_command_recv_extra_bytes_for_non_truncate_error_r1() {
+        let command = vec![0b0100_1000, 0, 0, common::VOLTAGE_2_7_TO_3_6, 85, 117];
+        let expectations = [
+            spi::Transaction::transfer(vec![0xff], vec![0xff]),
+            spi::Transaction::write(command.clone()),
+            spi::Transaction::transfer(vec![0xff], vec![0b0100_0000]), // R1 with parameter error
+            spi::Transaction::transfer(vec![0xff], vec![0x00]),
+            spi::Transaction::transfer(vec![0xff], vec![0x00]),
+            spi::Transaction::transfer(vec![0xff], vec![0x00]),
+            spi::Transaction::transfer(vec![0xff], vec![0x00]),
+        ];
+        let mut spi = spi::Mock::new(&expectations);
+
+        let _result = R7Response::execute_command(&mut spi, &command);
+
+        spi.done();
     }
 
     #[test]

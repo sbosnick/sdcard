@@ -46,7 +46,7 @@ pub struct R1Response(u8);
 ///
 /// This type is based on section 7.3.2.6 of the Simplified Specification.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct R7Response(u32);
+pub struct R7Response(u32, R1Response);
 
 /// Newtype to support decoding the R3 response (and the OCR register).
 ///
@@ -57,7 +57,22 @@ pub struct R7Response(u32);
 ///
 /// This type is based on section 7.3.2.4 of the Simplified Specification.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct R3Response(u32);
+pub struct R3Response(u32, R1Response);
+
+/// Interface to create a response type from the initial R1 byte and the
+/// remaining bytes for the response.
+pub trait Response {
+    /// The type of the extra bytes for the response.
+    ///
+    /// This should likely be [u8; N] for some N.
+    type ExtraBytes: AsMut<[u8]> + Default;
+
+    /// Create the response from the inital r1 byte and the SIZE -1 extra
+    /// bytes.
+    fn create(r1: R1Response, extra_bytes: &Self::ExtraBytes) -> Self;
+
+    fn r1(&self) -> &R1Response;
+}
 
 #[derive(Debug, PartialEq, Snafu)]
 pub enum ResponseError {
@@ -116,14 +131,26 @@ impl R1Response {
     }
 }
 
+impl Response for R1Response {
+    type ExtraBytes = [u8; 0];
+
+    fn create(r1: R1Response, _extra_bytes: &Self::ExtraBytes) -> Self {
+        r1
+    }
+
+    fn r1(&self) -> &R1Response {
+        self
+    }
+}
+
 impl R3Response {
-    pub fn new(byte2: u8, byte3: u8, byte4: u8, byte5: u8) -> Self {
+    pub fn new(byte2: u8, byte3: u8, byte4: u8, byte5: u8, r1: R1Response) -> Self {
         let b2: u32 = byte2 as u32;
         let b3: u32 = byte3 as u32;
         let b4: u32 = byte4 as u32;
         let b5: u32 = byte5 as u32;
 
-        R3Response((b2 << 24) | (b3 << 16) | (b4 << 8) | b5)
+        R3Response((b2 << 24) | (b3 << 16) | (b4 << 8) | b5, r1)
     }
 
     pub fn card_capacity(&self) -> CardCapacity {
@@ -137,14 +164,32 @@ impl R3Response {
     }
 }
 
+impl Response for R3Response {
+    type ExtraBytes = [u8; 4];
+
+    fn create(r1: R1Response, extra_bytes: &Self::ExtraBytes) -> Self {
+        R3Response::new(
+            extra_bytes[0],
+            extra_bytes[1],
+            extra_bytes[2],
+            extra_bytes[3],
+            r1,
+        )
+    }
+
+    fn r1(&self) -> &R1Response {
+        &self.1
+    }
+}
+
 impl R7Response {
-    pub fn new(byte2: u8, byte3: u8, byte4: u8, byte5: u8) -> Self {
+    pub fn new(byte2: u8, byte3: u8, byte4: u8, byte5: u8, r1: R1Response) -> Self {
         let b2: u32 = byte2 as u32;
         let b3: u32 = byte3 as u32;
         let b4: u32 = byte4 as u32;
         let b5: u32 = byte5 as u32;
 
-        R7Response((b2 << 24) | (b3 << 16) | (b4 << 8) | b5)
+        R7Response((b2 << 24) | (b3 << 16) | (b4 << 8) | b5, r1)
     }
 
     pub fn check(&self, check_pattern: u8) -> Result<(), ResponseError> {
@@ -160,6 +205,24 @@ impl R7Response {
         );
 
         Ok(())
+    }
+}
+
+impl Response for R7Response {
+    type ExtraBytes = [u8; 4];
+
+    fn create(r1: R1Response, extra_bytes: &Self::ExtraBytes) -> Self {
+        R7Response::new(
+            extra_bytes[0],
+            extra_bytes[1],
+            extra_bytes[2],
+            extra_bytes[3],
+            r1,
+        )
+    }
+
+    fn r1(&self) -> &R1Response {
+        &self.1
     }
 }
 
@@ -260,7 +323,7 @@ mod tests {
 
     #[test]
     fn r7_with_unexpect_voltage_is_error() {
-        let r7 = R7Response::new(0, 0, 0b0000_0100, 0);
+        let r7 = R7Response::new(0, 0, 0b0000_0100, 0, R1Response(0));
         let result = r7.check(0);
 
         assert_eq!(result, Err(ResponseError::UnexpectVoltage));
@@ -268,7 +331,7 @@ mod tests {
 
     #[test]
     fn r7_with_unexpted_check_pattern_is_error() {
-        let r7 = R7Response::new(0, 0, VOLTAGE_2_7_TO_3_6, 0xff);
+        let r7 = R7Response::new(0, 0, VOLTAGE_2_7_TO_3_6, 0xff, R1Response(0));
         let result = r7.check(0xab);
 
         assert_eq!(result, Err(ResponseError::CheckPatternMismatch));
@@ -278,7 +341,7 @@ mod tests {
     fn r7_with_expected_values_is_ok() {
         let check_pattern = 42;
 
-        let r7 = R7Response::new(0, 0, VOLTAGE_2_7_TO_3_6, check_pattern);
+        let r7 = R7Response::new(0, 0, VOLTAGE_2_7_TO_3_6, check_pattern, R1Response(0));
         let result = r7.check(check_pattern);
 
         assert_eq!(result, Ok(()));
@@ -286,14 +349,14 @@ mod tests {
 
     #[test]
     fn r3_with_ccs_set_gives_expected_capacity() {
-        let r3 = R3Response::new(0b0100_0000, 0, 0, 0);
+        let r3 = R3Response::new(0b0100_0000, 0, 0, 0, R1Response(0));
 
         assert_eq!(r3.card_capacity(), CardCapacity::HighOrExtended);
     }
 
     #[test]
     fn r3_with_css_unset_gives_expected_capacity() {
-        let r3 = R3Response::new(0, 0, 0, 0);
+        let r3 = R3Response::new(0, 0, 0, 0, R1Response(0));
 
         assert_eq!(r3.card_capacity(), CardCapacity::Standard);
     }
