@@ -117,8 +117,6 @@ impl R1Response {
 }
 
 impl R3Response {
-    // TODO: remove this when it is no longer needed
-    #[allow(dead_code)]
     pub fn new(byte2: u8, byte3: u8, byte4: u8, byte5: u8) -> Self {
         let b2: u32 = byte2 as u32;
         let b3: u32 = byte3 as u32;
@@ -128,8 +126,6 @@ impl R3Response {
         R3Response((b2 << 24) | (b3 << 16) | (b4 << 8) | b5)
     }
 
-    // TODO: remove this when it is no longer needed
-    #[allow(dead_code)]
     pub fn card_capacity(&self) -> CardCapacity {
         const CSS: u32 = 0b0100_0000_0000_0000_0000_0000_0000_0000;
 
@@ -142,8 +138,6 @@ impl R3Response {
 }
 
 impl R7Response {
-    // TODO: remove this when it is no longer needed
-    #[allow(dead_code)]
     pub fn new(byte2: u8, byte3: u8, byte4: u8, byte5: u8) -> Self {
         let b2: u32 = byte2 as u32;
         let b3: u32 = byte3 as u32;
@@ -153,8 +147,6 @@ impl R7Response {
         R7Response((b2 << 24) | (b3 << 16) | (b4 << 8) | b5)
     }
 
-    // TODO: remove this when it is no longer needed
-    #[allow(dead_code)]
     pub fn check(&self, check_pattern: u8) -> Result<(), ResponseError> {
         const VOLTAGE_ACCEPTED_MASK: u32 = 0b0000_1111 << 8;
         const CHECK_PATTERN_MASK: u32 = 0x0000_00FF;

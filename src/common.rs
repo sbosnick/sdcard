@@ -29,8 +29,6 @@ pub const IF_COND_CHECK_PATTERN: u8 = 0b0101_0101;
 ///
 /// Note that Ultra Capacity (SDUC) cards are not supported in SPI mode
 /// (see section 7.1) so there is no entry for them here.
-// TODO: removed this when it is no longer needed
-#[allow(dead_code)]
 #[derive(Debug, PartialEq)]
 pub enum CardCapacity {
     /// SDSC card
