@@ -54,6 +54,11 @@ pub enum CrcOption {
     Off,
 }
 
+/// Encode a ReadOCR command.
+pub fn read_ocr(buffer: &mut [u8]) {
+    Cmd::ReadOCR.encode(0, buffer)
+}
+
 static CRC7: Crc<u8> = Crc::<u8>::new(&CRC_7_MMC);
 
 // This enum has all of the allowed commands for an SD Card in SPI mode,

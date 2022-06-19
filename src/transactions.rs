@@ -23,7 +23,7 @@ use snafu::prelude::*;
 use crate::{
     cmds::{self, HostCapacitySupport},
     common::{self, CardCapacity},
-    resp::{R1Response, R7Response, ResponseError},
+    resp::{R1Response, R3Response, R7Response, ResponseError},
 };
 
 const WAIT_FOR_CARD_COUNT: u32 = 32;
@@ -97,9 +97,7 @@ where
     send_op_cond(spi, version)?;
 
     // 7. If not v1 card then ReadOcr and check card capacity
-    // TODO: implement this
-
-    Ok(CardCapacity::Standard)
+    check_card_capacity(spi, version)
 }
 
 pub fn with_cs_low<CS, SPI, F, O>(cs: &mut CS, spi: &mut SPI, f: F) -> Result<O, Error>
@@ -190,6 +188,24 @@ where
     }
 
     UnusableCardSnafu {}.fail()
+}
+
+fn check_card_capacity<SPI>(spi: &mut SPI, version: Version) -> Result<CardCapacity, Error>
+where
+    SPI: Write<u8> + Transfer<u8>,
+{
+    match version {
+        Version::V1 => Ok(CardCapacity::Standard),
+        Version::V2 => {
+            let mut command = [0; 6];
+
+            cmds::read_ocr(&mut command);
+            execute_command(spi, &command)?;
+            // TODO: handle the non-truncate error case
+            let r3 = R3Response::new(receive(spi)?, receive(spi)?, receive(spi)?, receive(spi)?);
+            Ok(r3.card_capacity())
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -557,5 +573,53 @@ mod test {
 
         spi.done();
         assert_eq!(result, Err(Error::UnusableCard));
+    }
+
+    #[test]
+    fn check_card_capacity_for_v1_is_standard() {
+        let mut spi = spi::Mock::new(iter::empty());
+
+        let result = check_card_capacity(&mut spi, Version::V1);
+
+        spi.done();
+        assert_eq!(result, Ok(CardCapacity::Standard));
+    }
+
+    #[test]
+    fn check_card_capacity_for_v2_without_ccs_is_standard() {
+        let expectations = [
+            spi::Transaction::transfer(vec![0xff], vec![0xff]),
+            spi::Transaction::write(vec![0b0111_1010, 0, 0, 0, 0, 253]),
+            spi::Transaction::transfer(vec![0xff], vec![0x00]),
+            spi::Transaction::transfer(vec![0xff], vec![0x00]),
+            spi::Transaction::transfer(vec![0xff], vec![0x00]),
+            spi::Transaction::transfer(vec![0xff], vec![0x00]),
+            spi::Transaction::transfer(vec![0xff], vec![0x00]),
+        ];
+        let mut spi = spi::Mock::new(&expectations);
+
+        let result = check_card_capacity(&mut spi, Version::V2);
+
+        spi.done();
+        assert_eq!(result, Ok(CardCapacity::Standard));
+    }
+
+    #[test]
+    fn check_card_capacity_for_v2_withccs_is_high_or_extended() {
+        let expectations = [
+            spi::Transaction::transfer(vec![0xff], vec![0xff]),
+            spi::Transaction::write(vec![0b0111_1010, 0, 0, 0, 0, 253]),
+            spi::Transaction::transfer(vec![0xff], vec![0x00]),
+            spi::Transaction::transfer(vec![0xff], vec![0b0100_0000]),
+            spi::Transaction::transfer(vec![0xff], vec![0x00]),
+            spi::Transaction::transfer(vec![0xff], vec![0x00]),
+            spi::Transaction::transfer(vec![0xff], vec![0x00]),
+        ];
+        let mut spi = spi::Mock::new(&expectations);
+
+        let result = check_card_capacity(&mut spi, Version::V2);
+
+        spi.done();
+        assert_eq!(result, Ok(CardCapacity::HighOrExtended));
     }
 }

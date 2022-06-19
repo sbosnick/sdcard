@@ -63,6 +63,8 @@ impl Write<u8> for FakeCard {
             State::CommandPending if words[0] & 0b1100_0000 == 0b0100_0000 => {
                 if words[0] & 0b0011_1111 == 8 {
                     self.state = State::R7ResponsePending(4);
+                } else if words[0] & 0b0011_1111 == 58 {
+                    self.state = State::R3ResponsePending(4);
                 } else {
                     self.state = State::ResponsePending;
                 }
@@ -70,6 +72,7 @@ impl Write<u8> for FakeCard {
             }
             State::CommandPending => todo!(),
             State::ResponsePending => todo!(),
+            State::R3ResponsePending(_) => todo!(),
             State::R7ResponsePending(_) => todo!(),
         }
     }
@@ -90,6 +93,22 @@ impl Transfer<u8> for FakeCard {
                 self.state = State::Start;
                 // Note: this is a non-idle, non-error R1 response
                 words[0] = 0;
+                Ok(words)
+            }
+            State::R3ResponsePending(byte) => {
+                self.state = if byte == 0 {
+                    State::Start
+                } else {
+                    State::R3ResponsePending(byte - 1)
+                };
+                words[0] = match byte {
+                    4 => 0,
+                    3 => 0,
+                    2 => 0,
+                    1 => 0,
+                    0 => 0,
+                    _ => panic!("unexpect byte count for R3 response"),
+                };
                 Ok(words)
             }
             State::R7ResponsePending(byte) => {
@@ -117,6 +136,7 @@ enum State {
     Start,
     CommandPending,
     ResponsePending,
+    R3ResponsePending(u8),
     R7ResponsePending(u8),
 }
 
