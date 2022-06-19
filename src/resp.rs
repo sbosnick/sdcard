@@ -88,12 +88,6 @@ impl R1Response {
         Self(value)
     }
 
-    // TODO: remove this when it is no longer needed
-    #[allow(dead_code)]
-    pub fn is_idle(self) -> Result<bool, ResponseError> {
-        self.check_error().map(|r| r.is_set(Self::IDLE))
-    }
-
     pub fn check_error(self) -> Result<R1Response, ResponseError> {
         ensure!(self.is_clear(Self::ILLEGAL_COMMAND), IllegalCommandSnafu);
         ensure!(self.is_clear(Self::COM_CRC_ERROR), ComCrcSnafu);
@@ -256,27 +250,6 @@ mod tests {
         let result = R1Response::new(0b0001_0100).check_error();
 
         assert_eq!(result, Err(ResponseError::IllegalCommand))
-    }
-
-    #[test]
-    fn r1_idle_with_error_is_error() {
-        let result = R1Response::new(0b0000_0101).is_idle();
-
-        assert_eq!(result, Err(ResponseError::IllegalCommand))
-    }
-
-    #[test]
-    fn r1_idle_without_error_is_idle() {
-        let result = R1Response::new(0b0000_0001).is_idle();
-
-        assert_eq!(result, Ok(true));
-    }
-
-    #[test]
-    fn r1_none_is_not_idle_or_error() {
-        let result = R1Response::new(0).is_idle();
-
-        assert_eq!(result, Ok(false));
     }
 
     #[test]
