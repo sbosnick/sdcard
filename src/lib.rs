@@ -83,7 +83,7 @@ where
         // are references to the Simplifed Specification).
 
         let result = power_up_card(&mut spi, &mut cs, &mut delay)
-            .and_then(|_| with_cs_low(&mut cs, &mut spi, initilization_flow));
+            .and_then(|_| with_cs_low(&mut cs, &mut spi, &mut delay, initilization_flow));
 
         match result {
             Ok(capacity) => {

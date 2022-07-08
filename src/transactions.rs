@@ -73,9 +73,13 @@ pub fn power_up_card(
     Ok(())
 }
 
-pub fn initilization_flow<SPI>(spi: &mut SPI) -> Result<CardCapacity, Error>
+pub fn initilization_flow<SPI, DELAY>(
+    spi: &mut SPI,
+    _delay: &mut DELAY,
+) -> Result<CardCapacity, Error>
 where
     SPI: Write<u8> + Transfer<u8>,
+    DELAY: DelayUs<u16>,
 {
     let mut command = [0; 6];
 
@@ -100,15 +104,21 @@ where
     check_card_capacity(spi, version)
 }
 
-pub fn with_cs_low<CS, SPI, F, O>(cs: &mut CS, spi: &mut SPI, f: F) -> Result<O, Error>
+pub fn with_cs_low<CS, SPI, DELAY, F, O>(
+    cs: &mut CS,
+    spi: &mut SPI,
+    delay: &mut DELAY,
+    f: F,
+) -> Result<O, Error>
 where
     CS: OutputPin,
     SPI: Write<u8>,
-    F: Fn(&mut SPI) -> Result<O, Error>,
+    DELAY: DelayUs<u16>,
+    F: Fn(&mut SPI, &mut DELAY) -> Result<O, Error>,
 {
     cs.set_low()
         .map_err(|_| ChipSelectSnafu {}.build())
-        .and_then(|_| f(spi))
+        .and_then(|_| f(spi, delay))
         .and_then(|o| {
             cs.set_high()
                 .map(|_| o)
@@ -317,8 +327,9 @@ mod test {
         let set_low = pin::Transaction::set(pin::State::Low);
         let set_high = pin::Transaction::set(pin::State::High);
         let mut cs = pin::Mock::new(&[set_low, set_high]);
+        let mut delay = delay::MockNoop::new();
 
-        let _ = with_cs_low(&mut cs, &mut StubSpi, |_| Ok(()));
+        let _ = with_cs_low(&mut cs, &mut StubSpi, &mut delay, |_, _| Ok(()));
 
         cs.done();
     }
