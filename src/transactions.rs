@@ -13,7 +13,7 @@
 
 use embedded_hal::{
     blocking::{
-        delay::DelayMs,
+        delay::DelayUs,
         spi::{Transfer, Write},
     },
     digital::v2::OutputPin,
@@ -59,11 +59,11 @@ pub enum Error {
 pub fn power_up_card(
     spi: &mut impl Write<u8>,
     cs: &mut impl OutputPin,
-    delay: &mut impl DelayMs<u8>,
+    delay: &mut impl DelayUs<u16>,
 ) -> Result<(), Error> {
     // 1. delay 1 ms then 74 clocks with CS high (6.4.1.1)
 
-    delay.delay_ms(1);
+    delay.delay_us(1000);
     cs.set_high().map_err(|_| ChipSelectSnafu {}.build())?;
 
     // Note that 74 bits rounded up is 10 bytes

@@ -25,7 +25,7 @@ use core::fmt::Debug;
 use common::CardCapacity;
 use embedded_hal::{
     blocking::{
-        delay::DelayMs,
+        delay::DelayUs,
         spi::{Transfer, Write},
     },
     digital::v2::OutputPin,
@@ -59,7 +59,7 @@ where
     pub fn new(
         spi: SPI,
         cs: CS,
-        delay: &mut impl DelayMs<u8>,
+        delay: &mut impl DelayUs<u16>,
     ) -> Result<Self, InitilizationError<SPI, CS>> {
         Self::with_speed_increase(spi, cs, delay, |spi| spi)
     }
@@ -74,7 +74,7 @@ where
     pub fn with_speed_increase(
         mut spi: SPI,
         mut cs: CS,
-        delay: &mut impl DelayMs<u8>,
+        delay: &mut impl DelayUs<u16>,
         increase_speed: impl FnOnce(SPI) -> SPI,
     ) -> Result<Self, InitilizationError<SPI, CS>> {
         // This initialized the SD card using the power up sequence in section
