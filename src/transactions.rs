@@ -30,6 +30,7 @@ const WAIT_FOR_CARD_COUNT: u32 = 32;
 const MAX_WAIT_FOR_RESPONSE: u32 = 8;
 const MAX_IF_COND_COUNT: u32 = 5;
 const MAX_OP_COND_COUNT: u32 = 3_200;
+const OP_COND_DELAY: u16 = 50;
 
 #[derive(Debug, PartialEq, Snafu)]
 pub enum Error {
@@ -75,7 +76,7 @@ pub fn power_up_card(
 
 pub fn initilization_flow<SPI, DELAY>(
     spi: &mut SPI,
-    _delay: &mut DELAY,
+    delay: &mut DELAY,
 ) -> Result<CardCapacity, Error>
 where
     SPI: Write<u8> + Transfer<u8>,
@@ -98,7 +99,7 @@ where
     // For now assume that the voltage is 3.3 V which is always supported.
 
     // 6. SendOpCond (with HCR if not v1 card) repeatedly until not idle
-    send_op_cond(spi, version)?;
+    send_op_cond(spi, version, delay)?;
 
     // 7. If not v1 card then ReadOcr and check card capacity
     check_card_capacity(spi, version)
@@ -164,7 +165,11 @@ where
     UnusableCardSnafu {}.fail()
 }
 
-fn send_op_cond<SPI>(spi: &mut SPI, version: Version) -> Result<(), Error>
+fn send_op_cond<SPI>(
+    spi: &mut SPI,
+    version: Version,
+    delay: &mut impl DelayUs<u16>,
+) -> Result<(), Error>
 where
     SPI: Write<u8> + Transfer<u8>,
 {
@@ -181,7 +186,7 @@ where
             return Ok(());
         }
 
-        // TODO: use a DelayUs here
+        delay.delay_us(OP_COND_DELAY)
     }
 
     UnusableCardSnafu {}.fail()
@@ -577,8 +582,9 @@ mod test {
             spi::Transaction::transfer(vec![0xff], vec![0]), // R1 with no error and not idle
         ];
         let mut spi = spi::Mock::new(&expectations);
+        let mut delay = delay::MockNoop::new();
 
-        send_op_cond(&mut spi, Version::V1).expect("Unable to send op cond.");
+        send_op_cond(&mut spi, Version::V1, &mut delay).expect("Unable to send op cond.");
 
         spi.done();
     }
@@ -596,8 +602,9 @@ mod test {
             spi::Transaction::transfer(vec![0xff], vec![0]), // R1 with no error and not idle
         ];
         let mut spi = spi::Mock::new(&expectations);
+        let mut delay = delay::MockNoop::new();
 
-        send_op_cond(&mut spi, Version::V2).expect("Unable to send op cond.");
+        send_op_cond(&mut spi, Version::V2, &mut delay).expect("Unable to send op cond.");
 
         spi.done();
     }
@@ -621,8 +628,9 @@ mod test {
             spi::Transaction::transfer(vec![0xff], vec![0b0000_0000]), // R1 with no error and not idle
         ];
         let mut spi = spi::Mock::new(&expectations);
+        let mut delay = delay::MockNoop::new();
 
-        send_op_cond(&mut spi, Version::V2).expect("Unable to send op cond.");
+        send_op_cond(&mut spi, Version::V2, &mut delay).expect("Unable to send op cond.");
 
         spi.done();
     }
@@ -643,8 +651,9 @@ mod test {
             ]);
         }
         let mut spi = spi::Mock::new(&expectations);
+        let mut delay = delay::MockNoop::new();
 
-        let result = send_op_cond(&mut spi, Version::V2);
+        let result = send_op_cond(&mut spi, Version::V2, &mut delay);
 
         spi.done();
         assert_eq!(result, Err(Error::UnusableCard));
