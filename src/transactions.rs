@@ -27,6 +27,7 @@ use crate::{
 };
 
 const WAIT_FOR_CARD_COUNT: u32 = 32;
+const WAIT_FOR_CARD_DELAY: u16 = 10;
 const MAX_WAIT_FOR_RESPONSE: u32 = 8;
 const MAX_IF_COND_COUNT: u32 = 5;
 const MAX_OP_COND_COUNT: u32 = 3_200;
@@ -86,14 +87,14 @@ where
 
     // 2. GoIdleState
     cmds::go_idle_state(&mut command);
-    execute_command(spi, &command)?;
+    execute_command(spi, delay, &command)?;
 
     // 3. SendIfCond and check for illegal command (v1 card)
-    let version = send_if_cond(spi)?;
+    let version = send_if_cond(spi, delay)?;
 
     // 4. CrcOnOff to turn crc checking on
     cmds::crc_on_off(cmds::CrcOption::On, &mut command);
-    execute_command(spi, &command)?;
+    execute_command(spi, delay, &command)?;
 
     // 5. ReadOcr and check for compatible voltage (or assume it is in range)
     // For now assume that the voltage is 3.3 V which is always supported.
@@ -102,7 +103,7 @@ where
     send_op_cond(spi, version, delay)?;
 
     // 7. If not v1 card then ReadOcr and check card capacity
-    check_card_capacity(spi, version)
+    check_card_capacity(spi, delay, version)
 }
 
 pub fn with_cs_low<CS, SPI, DELAY, F, O>(
@@ -132,9 +133,10 @@ where
         })
 }
 
-fn send_if_cond<SPI>(spi: &mut SPI) -> Result<Version, Error>
+fn send_if_cond<SPI, DELAY>(spi: &mut SPI, delay: &mut DELAY) -> Result<Version, Error>
 where
     SPI: Write<u8> + Transfer<u8>,
+    DELAY: DelayUs<u16>,
 {
     let mut command = [0; 6];
     let check_pattern = common::IF_COND_CHECK_PATTERN;
@@ -143,7 +145,7 @@ where
         let mut retry = false;
 
         cmds::send_if_cond(check_pattern, &mut command);
-        let result = R7Response::execute_command(spi, &command)
+        let result = R7Response::execute_command(spi, delay, &command)
             .map(|r7| {
                 if r7.check(check_pattern).is_err() {
                     retry = true;
@@ -177,10 +179,10 @@ where
 
     for _ in 0..MAX_OP_COND_COUNT {
         cmds::app_cmd(&mut command);
-        execute_command(spi, &command)?;
+        execute_command(spi, delay, &command)?;
 
         cmds::sd_send_op_cond(version.into(), &mut command);
-        let r1 = execute_command(spi, &command)?;
+        let r1 = execute_command(spi, delay, &command)?;
 
         if r1 & R1Response::IDLE == R1Response::NONE {
             return Ok(());
@@ -192,9 +194,14 @@ where
     UnusableCardSnafu {}.fail()
 }
 
-fn check_card_capacity<SPI>(spi: &mut SPI, version: Version) -> Result<CardCapacity, Error>
+fn check_card_capacity<SPI, DELAY>(
+    spi: &mut SPI,
+    delay: &mut DELAY,
+    version: Version,
+) -> Result<CardCapacity, Error>
 where
     SPI: Write<u8> + Transfer<u8>,
+    DELAY: DelayUs<u16>,
 {
     match version {
         Version::V1 => Ok(CardCapacity::Standard),
@@ -202,7 +209,7 @@ where
             let mut command = [0; 6];
 
             cmds::read_ocr(&mut command);
-            R3Response::execute_command(spi, &command).map(|r3| r3.card_capacity())
+            R3Response::execute_command(spi, delay, &command).map(|r3| r3.card_capacity())
         }
     }
 }
@@ -222,30 +229,45 @@ impl From<Version> for HostCapacitySupport {
     }
 }
 
-fn execute_command<SPI>(spi: &mut SPI, cmd: &[u8]) -> Result<R1Response, Error>
+fn execute_command<SPI, DELAY>(
+    spi: &mut SPI,
+    delay: &mut DELAY,
+    cmd: &[u8],
+) -> Result<R1Response, Error>
 where
     SPI: Write<u8> + Transfer<u8>,
+    DELAY: DelayUs<u16>,
 {
-    R1Response::execute_command(spi, cmd)
+    R1Response::execute_command(spi, delay, cmd)
 }
 
 trait Execute
 where
     Self: Sized,
 {
-    fn execute_command<SPI>(spi: &mut SPI, cmd: &[u8]) -> Result<Self, Error>
+    fn execute_command<SPI, DELAY>(
+        spi: &mut SPI,
+        delay: &mut DELAY,
+        cmd: &[u8],
+    ) -> Result<Self, Error>
     where
-        SPI: Write<u8> + Transfer<u8>;
+        SPI: Write<u8> + Transfer<u8>,
+        DELAY: DelayUs<u16>;
 }
 
 impl<R: Response> Execute for R {
-    fn execute_command<SPI>(spi: &mut SPI, cmd: &[u8]) -> Result<Self, Error>
+    fn execute_command<SPI, DELAY>(
+        spi: &mut SPI,
+        delay: &mut DELAY,
+        cmd: &[u8],
+    ) -> Result<Self, Error>
     where
         SPI: Write<u8> + Transfer<u8>,
+        DELAY: DelayUs<u16>,
     {
         debug_assert_eq!(cmd.len(), 6);
 
-        wait_for_card(spi)?;
+        wait_for_card(spi, delay)?;
 
         spi.write(cmd).map_err(|_| SpiWriteSnafu {}.build())?;
 
@@ -271,13 +293,17 @@ impl<R: Response> Execute for R {
     }
 }
 
-fn wait_for_card<SPI: Transfer<u8>>(spi: &mut SPI) -> Result<(), Error> {
+fn wait_for_card<SPI, DELAY>(spi: &mut SPI, delay: &mut DELAY) -> Result<(), Error>
+where
+    SPI: Transfer<u8>,
+    DELAY: DelayUs<u16>,
+{
     for _ in 0..WAIT_FOR_CARD_COUNT {
         if receive(spi)? == 0xff {
             return Ok(());
         }
 
-        // TODO: use a DelayUs impl here
+        delay.delay_us(WAIT_FOR_CARD_DELAY);
     }
 
     WaitForCardTimeoutSnafu {}.fail()
@@ -348,8 +374,9 @@ mod test {
             spi::Transaction::transfer(vec![0xff], vec![0xff]),
         ];
         let mut spi = spi::Mock::new(&expected);
+        let mut delay = delay::MockNoop::new();
 
-        let result = wait_for_card(&mut spi);
+        let result = wait_for_card(&mut spi, &mut delay);
 
         spi.done();
         assert_eq!(result, Ok(()));
@@ -361,8 +388,9 @@ mod test {
             iter::repeat(&spi::Transaction::transfer(vec![0xff], vec![0x00]))
                 .take(WAIT_FOR_CARD_COUNT.try_into().unwrap()),
         );
+        let mut delay = delay::MockNoop::new();
 
-        let result = wait_for_card(&mut spi);
+        let result = wait_for_card(&mut spi, &mut delay);
 
         assert_eq!(result, Err(Error::WaitForCardTimeout));
     }
@@ -376,8 +404,9 @@ mod test {
             spi::Transaction::transfer(vec![0xff], vec![0x00]),
         ];
         let mut spi = spi::Mock::new(&expectations);
+        let mut delay = delay::MockNoop::new();
 
-        execute_command(&mut spi, &command).expect("error executing command");
+        execute_command(&mut spi, &mut delay, &command).expect("error executing command");
 
         spi.done();
     }
@@ -391,8 +420,9 @@ mod test {
             spi::Transaction::transfer(vec![0xff], vec![0b0100_0000]),
         ];
         let mut spi = spi::Mock::new(&expectations);
+        let mut delay = delay::MockNoop::new();
 
-        let result = execute_command(&mut spi, &command);
+        let result = execute_command(&mut spi, &mut delay, &command);
 
         spi.done();
         assert!(matches!(result, Err(Error::CommandResponse { source: _ })));
@@ -414,8 +444,9 @@ mod test {
             spi::Transaction::transfer(vec![0xff], vec![0xff]),
         ];
         let mut spi = spi::Mock::new(&expectations);
+        let mut delay = delay::MockNoop::new();
 
-        let result = execute_command(&mut spi, &command);
+        let result = execute_command(&mut spi, &mut delay, &command);
 
         spi.done();
         assert!(matches!(result, Err(Error::WaitForResponseTimeout)));
@@ -430,8 +461,9 @@ mod test {
             spi::Transaction::transfer(vec![0xff], vec![0b0000_0100]), // R1 with illegal command
         ];
         let mut spi = spi::Mock::new(&expectations);
+        let mut delay = delay::MockNoop::new();
 
-        let _result = R7Response::execute_command(&mut spi, &command);
+        let _result = R7Response::execute_command(&mut spi, &mut delay, &command);
 
         spi.done();
     }
@@ -449,8 +481,9 @@ mod test {
             spi::Transaction::transfer(vec![0xff], vec![0x00]),
         ];
         let mut spi = spi::Mock::new(&expectations);
+        let mut delay = delay::MockNoop::new();
 
-        let _result = R7Response::execute_command(&mut spi, &command);
+        let _result = R7Response::execute_command(&mut spi, &mut delay, &command);
 
         spi.done();
     }
@@ -468,8 +501,9 @@ mod test {
             spi::Transaction::transfer(vec![0xff], vec![0x00]),
         ];
         let mut spi = spi::Mock::new(&expectations);
+        let mut delay = delay::MockNoop::new();
 
-        let _result = R7Response::execute_command(&mut spi, &command);
+        let _result = R7Response::execute_command(&mut spi, &mut delay, &command);
 
         spi.done();
     }
@@ -483,8 +517,9 @@ mod test {
             spi::Transaction::transfer(vec![0xff], vec![0b0000_0100]), // R1 with illegal command
         ];
         let mut spi = spi::Mock::new(&expectations);
+        let mut delay = delay::MockNoop::new();
 
-        let result = send_if_cond(&mut spi);
+        let result = send_if_cond(&mut spi, &mut delay);
 
         spi.done();
         assert!(matches!(result, Ok(Version::V1)));
@@ -503,8 +538,9 @@ mod test {
             spi::Transaction::transfer(vec![0xff], vec![85]), // R7 byte 5
         ];
         let mut spi = spi::Mock::new(&expectations);
+        let mut delay = delay::MockNoop::new();
 
-        let result = send_if_cond(&mut spi);
+        let result = send_if_cond(&mut spi, &mut delay);
 
         spi.done();
         assert!(matches!(result, Ok(Version::V2)));
@@ -530,8 +566,9 @@ mod test {
             spi::Transaction::transfer(vec![0xff], vec![85]), // R7 byte 5
         ];
         let mut spi = spi::Mock::new(&expectations);
+        let mut delay = delay::MockNoop::new();
 
-        let result = send_if_cond(&mut spi);
+        let result = send_if_cond(&mut spi, &mut delay);
 
         spi.done();
         assert!(matches!(result, Ok(Version::V2)));
@@ -562,8 +599,9 @@ mod test {
             ]);
         }
         let mut spi = spi::Mock::new(&expectations);
+        let mut delay = delay::MockNoop::new();
 
-        let result = send_if_cond(&mut spi);
+        let result = send_if_cond(&mut spi, &mut delay);
 
         spi.done();
         assert!(matches!(result, Err(Error::UnusableCard)));
@@ -662,8 +700,9 @@ mod test {
     #[test]
     fn check_card_capacity_for_v1_is_standard() {
         let mut spi = spi::Mock::new(iter::empty());
+        let mut delay = delay::MockNoop::new();
 
-        let result = check_card_capacity(&mut spi, Version::V1);
+        let result = check_card_capacity(&mut spi, &mut delay, Version::V1);
 
         spi.done();
         assert_eq!(result, Ok(CardCapacity::Standard));
@@ -681,8 +720,9 @@ mod test {
             spi::Transaction::transfer(vec![0xff], vec![0x00]),
         ];
         let mut spi = spi::Mock::new(&expectations);
+        let mut delay = delay::MockNoop::new();
 
-        let result = check_card_capacity(&mut spi, Version::V2);
+        let result = check_card_capacity(&mut spi, &mut delay, Version::V2);
 
         spi.done();
         assert_eq!(result, Ok(CardCapacity::Standard));
@@ -700,8 +740,9 @@ mod test {
             spi::Transaction::transfer(vec![0xff], vec![0x00]),
         ];
         let mut spi = spi::Mock::new(&expectations);
+        let mut delay = delay::MockNoop::new();
 
-        let result = check_card_capacity(&mut spi, Version::V2);
+        let result = check_card_capacity(&mut spi, &mut delay, Version::V2);
 
         spi.done();
         assert_eq!(result, Ok(CardCapacity::HighOrExtended));
