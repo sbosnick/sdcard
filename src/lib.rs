@@ -38,29 +38,29 @@ use transactions::{initilization_flow, power_up_card, with_cs_low};
 ///
 /// We need the Chip Select to be separate so we can write some bytes without
 /// Chip Select asserted to put the card into SPI mode.
-pub struct SDCard<SPI, CS> {
+pub struct SDCard<SPI, CS, DELAY> {
     spi: SPI,
     cs: CS,
+    // TODO: removed this when it is no longer needed
+    #[allow(dead_code)]
+    delay: DELAY,
     // TODO: removed this when it is no longer needed
     #[allow(dead_code)]
     capacity: CardCapacity,
 }
 
-impl<SPI, CS> SDCard<SPI, CS>
+impl<SPI, CS, DELAY> SDCard<SPI, CS, DELAY>
 where
     SPI: Debug + Write<u8> + Transfer<u8>,
     CS: Debug + OutputPin,
+    DELAY: DelayUs<u16>,
 {
     /// Create a new [`SDCard`] using the given `SPI` interface and chip select.
     ///
     /// The `SPI` interface should have a clock rate between 100 kHz and 400 kHz.
     /// See [`SDCard::with_speed_increase`] for a means to increase the clock
     /// rate after the card initilization is complete.
-    pub fn new(
-        spi: SPI,
-        cs: CS,
-        delay: &mut impl DelayUs<u16>,
-    ) -> Result<Self, InitilizationError<SPI, CS>> {
+    pub fn new(spi: SPI, cs: CS, delay: DELAY) -> Result<Self, InitilizationError<SPI, CS>> {
         Self::with_speed_increase(spi, cs, delay, |spi| spi)
     }
 
@@ -74,7 +74,7 @@ where
     pub fn with_speed_increase(
         mut spi: SPI,
         mut cs: CS,
-        delay: &mut impl DelayUs<u16>,
+        mut delay: DELAY,
         increase_speed: impl FnOnce(SPI) -> SPI,
     ) -> Result<Self, InitilizationError<SPI, CS>> {
         // This initialized the SD card using the power up sequence in section
@@ -82,24 +82,29 @@ where
         // otherwise indicated the section and figure refences in the comments
         // are references to the Simplifed Specification).
 
-        let result = power_up_card(&mut spi, &mut cs, delay)
+        let result = power_up_card(&mut spi, &mut cs, &mut delay)
             .and_then(|_| with_cs_low(&mut cs, &mut spi, initilization_flow));
 
         match result {
             Ok(capacity) => {
                 // 8. (optional) Increase frequency of the SPI
                 let spi = increase_speed(spi);
-                Ok(Self { cs, spi, capacity })
+                Ok(Self {
+                    cs,
+                    spi,
+                    capacity,
+                    delay,
+                })
             }
             Err(e) => Err(InitilizationSnafu { cs, spi }.into_error(e)),
         }
     }
 }
 
-impl<SPI, CS> SDCard<SPI, CS> {
+impl<SPI, CS, DELAY> SDCard<SPI, CS, DELAY> {
     /// Consume the `SDCard` and return the underlying `SPI` and chip select.
-    pub fn release(self) -> (SPI, CS) {
-        (self.spi, self.cs)
+    pub fn release(self) -> (SPI, CS, DELAY) {
+        (self.spi, self.cs, self.delay)
     }
 }
 
@@ -124,13 +129,13 @@ impl<SPI: Debug, CS: Debug> InitilizationError<SPI, CS> {
 #[derive(Debug, Snafu)]
 pub struct IOError {}
 
-impl<SPI, CS> Storage for SDCard<SPI, CS> {
+impl<SPI, CS, DELAY> Storage for SDCard<SPI, CS, DELAY> {
     fn write(&mut self, _offset: u32, _bytes: &[u8]) -> Result<(), Self::Error> {
         todo!();
     }
 }
 
-impl<SPI, CS> ReadStorage for SDCard<SPI, CS> {
+impl<SPI, CS, DELAY> ReadStorage for SDCard<SPI, CS, DELAY> {
     type Error = IOError;
 
     fn read(&mut self, _offset: u32, _bytes: &mut [u8]) -> Result<(), Self::Error> {
@@ -155,9 +160,9 @@ mod tests {
     #[test]
     fn sd_card_with_speed_increase_increases_speed() {
         let mut increased = false;
-        let mut delay = delay::MockNoop::new();
+        let delay = delay::MockNoop::new();
 
-        SDCard::with_speed_increase(FakeCard::default(), StubPin, &mut delay, |s| {
+        SDCard::with_speed_increase(FakeCard::default(), StubPin, delay, |s| {
             increased = true;
             s
         })
@@ -173,15 +178,21 @@ mod tests {
     fn sd_card_release_returns_contained_resourses() {
         let spi = Arc::new(5);
         let cs = Arc::new(true);
+        let delay = Arc::new("yes");
 
         let sut = SDCard {
             spi: spi.clone(),
             cs: cs.clone(),
+            delay: delay.clone(),
             capacity: CardCapacity::Standard,
         };
-        let (rel_spi, rel_cs) = sut.release();
+        let (rel_spi, rel_cs, rel_delay) = sut.release();
 
         assert!(Arc::ptr_eq(&spi, &rel_spi), "spi missmatch on release");
         assert!(Arc::ptr_eq(&cs, &rel_cs), "cs missmatch on release");
+        assert!(
+            Arc::ptr_eq(&delay, &rel_delay),
+            "delay missmatch on release"
+        );
     }
 }
